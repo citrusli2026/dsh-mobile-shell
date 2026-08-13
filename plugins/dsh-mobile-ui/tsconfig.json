@@ -3,6 +3,7 @@
     "target": "es2024",
     "module": "esnext",
     "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
     "jsx": "react-jsx",
     "lib": ["es2024", "dom", "dom.iterable"],
     "types": ["node"],
