@@ -1,0 +1,24 @@
+{
+  "name": "@dsh-mobile/app",
+  "version": "0.1.0",
+  "private": true,
+  "description": "dsh-mobile: Capacitor shell connecting to a self-hosted DeepSeek Harness (dsh web) host",
+  "type": "module",
+  "scripts": {
+    "sync": "cap sync",
+    "open:android": "cap open android",
+    "open:ios": "cap open ios",
+    "build:android": "cd android && ./gradlew assembleDebug",
+    "build:ios": "xcodebuild -workspace ios/App/App.xcworkspace -scheme App -configuration Debug -destination 'generic/platform=iOS Simulator' -derivedDataPath ios/build SYMROOT=build",
+    "verify:android": "node scripts/verify-android.mjs",
+    "verify:ios": "node scripts/verify-ios.mjs"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.5.0",
+    "@capacitor/core": "^8.5.0",
+    "@capacitor/ios": "^8.5.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.5.0"
+  }
+}
