@@ -98,6 +98,18 @@ function upstreamHeaders(req) {
   return headers
 }
 
+/**
+ * Upgrade headers: same Host/Origin treatment, but the WS handshake headers
+ * (connection/upgrade/sec-websocket-*) must survive verbatim — dropping
+ * `connection: Upgrade` turns the handshake into a plain GET (upstream 426).
+ */
+function upgradeHeaders(req) {
+  const headers = { ...req.headers }
+  headers.host = TARGET_AUTHORITY
+  delete headers.origin
+  return headers
+}
+
 function forwardHttp(req, res, path) {
   const upstream = http.request({
     host: TARGET_HOST,
@@ -159,7 +171,7 @@ server.on('upgrade', (req, socket, head) => {
     port: TARGET_PORT,
     method: 'GET',
     path: stripTokenParam(url),
-    headers: upstreamHeaders(req),
+    headers: upgradeHeaders(req),
   })
   upstream.on('upgrade', (upRes, upSocket, upHead) => {
     const lines = Object.entries(upRes.headers)
