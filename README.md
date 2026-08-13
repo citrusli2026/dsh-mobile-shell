@@ -16,7 +16,7 @@
 
 ## 当前状态
 
-可行性分析阶段。分析与结论见 [`docs/`](docs/README.md)。
+阶段 3 首个交付已落地：移动 UI 插件 [`dsh-mobile-ui`](plugins/dsh-mobile-ui/)（树外客户端插件，操作条 + 会话抽屉）已实现并通过端到端验证（安装链、组合、伺服、行为测试）。分析与结论见 [`docs/`](docs/README.md)。
 
 ## 文档
 
@@ -26,4 +26,11 @@
 | [docs/01-project-analysis.md](docs/01-project-analysis.md) | 上游项目架构分析 |
 | [docs/02-build-and-dependencies.md](docs/02-build-and-dependencies.md) | 构建与依赖下载流程分析（含国内镜像方案） |
 | [docs/03-feasibility-analysis.md](docs/03-feasibility-analysis.md) | 移动版可行性分析与推荐路线 |
+| [docs/04-mobile-ui-plugin.md](docs/04-mobile-ui-plugin.md) | 移动 UI 插件实施与验证 |
 | [docs/decisions/](docs/decisions/) | 决策记录（ADR） |
+
+## 代码
+
+| 目录 | 内容 |
+|---|---|
+| [plugins/dsh-mobile-ui/](plugins/dsh-mobile-ui/) | 移动 UI 覆盖层插件（树外 `dsh.client` 双面包，可 `dsh plugin add` 安装） |
