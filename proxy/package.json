@@ -1,0 +1,17 @@
+{
+  "name": "@dsh-mobile/remote",
+  "version": "0.1.0",
+  "private": true,
+  "description": "dsh-remote: token-guard reverse proxy exposing a loopback dsh web host to the LAN/mobile app",
+  "type": "module",
+  "bin": {
+    "dsh-remote": "./dsh-remote.mjs"
+  },
+  "scripts": {
+    "start": "node dsh-remote.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT"
+}
