@@ -36,6 +36,12 @@ jobs:
       - name: Install JS dependencies
         run: npm ci --prefix app
 
+      # cap sync generates capacitor-cordova-android-plugins/*.gradle and
+      # copies www/ into the android assets; both are gitignored build output.
+      - name: Capacitor sync
+        run: npx cap sync android
+        working-directory: app
+
       - name: Assemble debug APK
         run: ./gradlew assembleDebug --console=plain
         working-directory: app/android

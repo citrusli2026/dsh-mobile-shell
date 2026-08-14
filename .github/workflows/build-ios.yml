@@ -24,6 +24,12 @@ jobs:
       - name: Install JS dependencies
         run: npm ci --prefix app
 
+      # cap sync copies www/ into ios/App/App/public (gitignored build output)
+      # and writes capacitor.config.json.
+      - name: Capacitor sync
+        run: npx cap sync ios
+        working-directory: app
+
       - name: Build for iOS Simulator
         run: >-
           xcodebuild -project app/ios/App/App.xcodeproj -scheme App
