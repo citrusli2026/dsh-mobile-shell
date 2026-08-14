@@ -64,7 +64,7 @@ xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Debug \
 |---|---|---|
 | 1 | PoC：壳 + 令牌代理，双端模拟器局域网验证 | ✅ 已完成（[实录](docs/05-phase1-poc.md)） |
 | 2 | 代理终结 TLS、二维码配对、向上游提交认证 PR | 计划中 |
-| 3 | 移动 UI 打磨（`dsh-mobile-ui`）、内置资产离线壳、TestFlight / 商店 | 进行中 |
+| 3 | 移动 UI 打磨（`dsh-mobile-ui`）、内置资产离线壳、TestFlight / 商店 | 进行中——[真机验证清单](docs/07-real-device-verification.md) |
 
 ## 文档
 

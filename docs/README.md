@@ -12,6 +12,7 @@
 | [04-mobile-ui-plugin.md](04-mobile-ui-plugin.md) | 实施 | 移动 UI 插件 dsh-mobile-ui 的实现、上游事实发现与端到端验证 |
 | [05-phase1-poc.md](05-phase1-poc.md) | 实录 | 阶段 1 PoC：壳/代理运行方法、双端局域网验证矩阵、踩坑记录、已知限制 |
 | [06-phase2-pairing-tls.md](06-phase2-pairing-tls.md) | 实录 | 阶段 2：配对码 + 可选 TLS 的实施与验证 |
+| [07-real-device-verification.md](07-real-device-verification.md) | 清单 | 真机验收：插件安装、Android/iOS 逐项用例、通过标准 |
 | [decisions/ADR-0001-docs-and-process.md](decisions/ADR-0001-docs-and-process.md) | ADR | 文档位置与过程记录方式 |
 | [decisions/ADR-0002-architecture-remote-client.md](decisions/ADR-0002-architecture-remote-client.md) | ADR | 总体架构：远端客户端而非端上移植 |
 | [decisions/ADR-0003-mobile-ui-out-of-tree-plugin.md](decisions/ADR-0003-mobile-ui-out-of-tree-plugin.md) | ADR | 移动 UI：树外客户端插件，不改上游源码 |

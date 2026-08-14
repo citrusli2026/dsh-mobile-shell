@@ -64,7 +64,7 @@ Slow downloads? China-mirror configurations for npm / Gradle / Maven / Node head
 |---|---|---|
 | 1 | PoC: shell + token proxy, LAN verification on both emulators | ✅ done ([report](docs/05-phase1-poc.md)) |
 | 2 | TLS at the proxy, QR-code pairing, upstream auth PR | planned |
-| 3 | Mobile UI polish (via `dsh-mobile-ui`), offline bundled assets, TestFlight / stores | in progress |
+| 3 | Mobile UI polish (via `dsh-mobile-ui`), offline bundled assets, TestFlight / stores | in progress — [real-device checklist](docs/07-real-device-verification.md) |
 
 ## Documentation
 
