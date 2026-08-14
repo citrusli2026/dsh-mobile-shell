@@ -11,7 +11,7 @@
 | 路径 | 说明 |
 |---|---|
 | [`app/`](app/) | Capacitor 8 双端壳：配对启动页（主机地址 + 令牌，可记忆），随后 WebView 直接加载主机伺服的原版前端——App 与主机版本永不脱节 |
-| [`proxy/`](proxy/) | `dsh-remote`：零依赖 Node ≥20 反代。`dsh web` 保持 loopback（上游刻意禁止绑 `0.0.0.0`），代理负责网络可达与逐请求（含 WebSocket 握手）的常量时间令牌门 |
+| [`proxy/`](proxy/) | `dsh-remote`：零依赖 Node ≥20 反代。`dsh web` 保持 loopback（上游刻意禁止绑 `0.0.0.0`），代理负责网络可达、逐请求（含 WebSocket 握手）的常量时间令牌门，并直接伺服启动页（Web 模式，ADR-0007） |
 | [`scripts/`](scripts/) | 验证工具（CDP 驱动的 Android 端到端、代理冒烟矩阵） |
 | [`docs/`](docs/) | 架构分析、可行性研究、PoC 实录，以及全部关键决策的 ADR |
 
@@ -28,10 +28,12 @@ DSH_REMOTE_TOKEN=$(openssl rand -hex 16) node proxy/dsh-remote.mjs
 # dsh-remote: pairing code 847291 — single use, expires in 10 min
 ```
 
-**2. 在手机上**（同一 Wi-Fi）——安装 App，填 `http://<电脑局域网IP>:3081` 与终端打印的**配对码**（主令牌全程不离开电脑；"令牌连接"保留为高级入口）：
+**2. 在手机上**（同一 Wi-Fi）——两种方式任选：
 
-- **Android**：从 [Releases](../../releases) 直接下载 APK 安装。
-- **iOS**：从源码构建（见下）或等待 TestFlight——苹果没有免签名的直接安装路径。
+- **Web 模式（零安装，ADR-0007）**：浏览器直接打开 `http://<电脑局域网IP>:3081/`——代理会自己吐出启动页。输入终端打印的**配对码**即可进入，主令牌全程不离开电脑。
+- **App**：安装壳，填 `http://<电脑局域网IP>:3081` 与配对码（"令牌连接"保留为高级入口）。记忆主机后一键重连。
+  - **Android**：从 [Releases](../../releases) 直接下载 APK 安装。
+  - **iOS**：从源码构建（见下）或等待 TestFlight——苹果没有免签名的直接安装路径。
 
 ## 从源码构建
 
@@ -54,8 +56,8 @@ xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Debug \
 
 ## 安全模型——暴露之前必读
 
-- 令牌是唯一认证手段；代理对每个请求和每次 WS 握手强制校验，未配置 `DSH_REMOTE_TOKEN` 时拒绝启动。
-- **当前 PoC 为明文 HTTP**：仅限可信局域网或 Tailscale 等组网内使用。在 TLS 落地（阶段 2）之前，不要把代理端口暴露到公网。
+- 令牌是唯一认证手段；代理对每个请求和每次 WS 握手强制校验，未配置 `DSH_REMOTE_TOKEN` 时拒绝启动。未授权访客只能看到启动页（Web 模式）——`/api`、WebSocket 与真正的 UI 全部有门；想恢复纯 401 面孔可设 `DSH_LAUNCHER=off`。
+- **默认明文 HTTP**：仅限可信局域网或 Tailscale 等组网内使用。公网暴露请启用 TLS，但**证书由你提供**（`DSH_TLS_CERT`/`DSH_TLS_KEY`——真实 CA 签发的域名证书；自签证书在原生 WebView 里不可用，见 ADR-0006）。
 - Android/iOS 工程因此放开了明文开关；TLS 落地时必须同步收回（ADR-0004）。
 
 ## 路线图
@@ -63,13 +65,13 @@ xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Debug \
 | 阶段 | 内容 | 状态 |
 |---|---|---|
 | 1 | PoC：壳 + 令牌代理，双端模拟器局域网验证 | ✅ 已完成（[实录](docs/05-phase1-poc.md)） |
-| 2 | 代理终结 TLS、二维码配对、向上游提交认证 PR | 计划中 |
+| 2 | 配对码、代理可选 TLS | ✅ 已完成（[实录](docs/06-phase2-pairing-tls.md)） |
 | 3 | 移动 UI 打磨（`dsh-mobile-ui`）、内置资产离线壳、TestFlight / 商店 | 进行中——[真机验证清单](docs/07-real-device-verification.md) |
 
 ## 文档
 
 - [docs/README.md](docs/README.md)——总索引：项目分析、构建与依赖指南、可行性研究、PoC 实录
-- [docs/decisions/](docs/decisions/)——ADR-0001…0005，每个关键决策一份
+- [docs/decisions/](docs/decisions/)——ADR-0001…0007，每个关键决策一份
 
 ## 许可证
 

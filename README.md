@@ -11,7 +11,7 @@ A community, open-source **mobile shell** for [DeepSeek Harness](https://github.
 | Path | What it is |
 |---|---|
 | [`app/`](app/) | Capacitor 8 shell for Android & iOS: a pairing launcher (host + token, remembered), then the WebView loads the exact frontend your host serves — app and host versions never diverge |
-| [`proxy/`](proxy/) | `dsh-remote`: a zero-dependency Node ≥20 reverse proxy. `dsh web` stays on loopback (upstream deliberately refuses `0.0.0.0`); the proxy owns network reachability and a constant-time token gate for every HTTP request and WebSocket handshake |
+| [`proxy/`](proxy/) | `dsh-remote`: a zero-dependency Node ≥20 reverse proxy. `dsh web` stays on loopback (upstream deliberately refuses `0.0.0.0`); the proxy owns network reachability, a constant-time token gate for every HTTP request and WebSocket handshake, and serves the launcher page itself (web mode, ADR-0007) |
 | [`scripts/`](scripts/) | Verification tooling (CDP-driven Android E2E, proxy smoke matrix) |
 | [`docs/`](docs/) | Analysis, feasibility study, PoC runbook, and every design decision as ADRs |
 
@@ -28,10 +28,12 @@ DSH_REMOTE_TOKEN=$(openssl rand -hex 16) node proxy/dsh-remote.mjs
 # dsh-remote: pairing code 847291 — single use, expires in 10 min
 ```
 
-**2. On your phone** (same Wi-Fi) — install the app, enter `http://<computer-LAN-IP>:3081` and the printed **pairing code** (the master token never leaves your computer; token entry remains as an advanced option):
+**2. On your phone** (same Wi-Fi) — two ways in:
 
-- **Android**: download the APK from [Releases](../../releases) and install directly.
-- **iOS**: build from source (below) or join TestFlight when available — Apple has no direct-install path for unsigned builds.
+- **Web mode (zero install, ADR-0007)**: open `http://<computer-LAN-IP>:3081/` in any browser — the proxy itself serves the launcher. Type the printed **pairing code** and you're in. The master token never leaves your computer.
+- **App**: install the shell, enter `http://<computer-LAN-IP>:3081` and the pairing code (token entry remains as an advanced option). A remembered host gives one-tap reconnect.
+  - **Android**: download the APK from [Releases](../../releases) and install directly.
+  - **iOS**: build from source (below) or join TestFlight when available — Apple has no direct-install path for unsigned builds.
 
 ## Build from source
 
@@ -54,22 +56,22 @@ Slow downloads? China-mirror configurations for npm / Gradle / Maven / Node head
 
 ## Security model — read before exposing anything
 
-- The token is the only authentication; the proxy enforces it on every request and WS handshake, and refuses to start without `DSH_REMOTE_TOKEN`.
-- **Plain HTTP in the current PoC**: use it on trusted LANs or mesh VPNs (Tailscale…) only. Do not expose the proxy port to the public internet before TLS lands (phase 2, see roadmap).
-- The Android/iOS projects allow cleartext traffic for the same reason; both switches must be tightened when TLS arrives (ADR-0004).
+- The token is the only authentication; the proxy enforces it on every request and WS handshake, and refuses to start without `DSH_REMOTE_TOKEN`. Unauthenticated visitors see only the launcher page (web mode) — `/api`, WebSocket and the real UI stay gated; disable with `DSH_LAUNCHER=off` if you prefer a bare 401.
+- **Plain HTTP by default**: use it on trusted LANs or mesh VPNs (Tailscale…) only. For public exposure, TLS is available but **you supply the certificate** (`DSH_TLS_CERT`/`DSH_TLS_KEY` — a domain cert from a real CA; self-signed is unusable in stock WebViews, see ADR-0006).
+- The Android/iOS projects allow cleartext traffic for the LAN case; tighten both switches behind TLS (ADR-0004).
 
 ## Roadmap
 
 | Phase | Scope | Status |
 |---|---|---|
 | 1 | PoC: shell + token proxy, LAN verification on both emulators | ✅ done ([report](docs/05-phase1-poc.md)) |
-| 2 | TLS at the proxy, QR-code pairing, upstream auth PR | planned |
+| 2 | Pairing codes, optional TLS at the proxy | ✅ done ([report](docs/06-phase2-pairing-tls.md)) |
 | 3 | Mobile UI polish (via `dsh-mobile-ui`), offline bundled assets, TestFlight / stores | in progress — [real-device checklist](docs/07-real-device-verification.md) |
 
 ## Documentation
 
 - [docs/README.md](docs/README.md) — full index: project analysis, build/dependency guide, feasibility study, PoC runbook
-- [docs/decisions/](docs/decisions/) — ADR-0001…0005, one per consequential choice
+- [docs/decisions/](docs/decisions/) — ADR-0001…0007, one per consequential choice
 
 ## License
 

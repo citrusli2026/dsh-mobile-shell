@@ -27,6 +27,8 @@ DSH_REMOTE_TOKEN=<上一步的令牌> node proxy/dsh-remote.mjs
 
 ## 2. 安装 App
 
+Web 模式（v0.3.0 起）无需安装：手机浏览器直接打开 `http://<电脑IP>:3081/` 即是启动页，见 A0 与 [08](08-web-mode.md)。App 安装路径：
+
 - **Android**：手机浏览器打开 Release 资产链接（国内加前缀 `https://ghproxy.net/`）：
   `https://github.com/citrusli2026/dsh-mobile-shell/releases/download/v0.2.0/dsh-mobile-shell-v0.2.0-android-debug.apk`
   下载后安装（允许"未知来源"）；或电脑 `adb install`。
@@ -38,6 +40,7 @@ DSH_REMOTE_TOKEN=<上一步的令牌> node proxy/dsh-remote.mjs
 
 ### A. 连接与配对
 
+- [ ] A0 Web 模式（v0.3.0 起）：手机浏览器直接打开 `http://<电脑IP>:3081/` → 出现启动页（地址框已隐藏）→ 输配对码进入 UI，无需装 App
 - [ ] A1 启动页默认在"配对码连接"：填 `http://<电脑IP>:3081` + 6 位码 → 进入 dsh UI，无报错横幅
 - [ ] A2 杀掉 App 重开 → 出现"已保存的主机"卡片 → "继续连接"直达 UI（记忆生效）
 - [ ] A3 故意输错配对码 → 明确错误提示；同一码用第二次 → 失败提示（单用生效）
