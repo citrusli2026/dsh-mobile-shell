@@ -1,7 +1,0 @@
-# dsh-mobile-ui bundle layer: inserts the mobile UI client plugin row into
-# the Web GUI browser roster. Stack this bundle after @deepseek-ai/dsh-web-app
-# so the client-modules node half scans the row together with the shipped
-# roster; user layers (profile/home/--patch) may still override or disable it.
-- insert:
-    - id: ui-mobile
-      name: 'dsh-mobile-ui'
