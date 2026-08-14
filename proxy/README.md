@@ -42,10 +42,11 @@ DSH_REMOTE_TOKEN=<token> DSH_TLS_CERT=/path/fullchain.pem DSH_TLS_KEY=/path/priv
 | `DSH_LISTEN_HOST` / `DSH_LISTEN_PORT` | `0.0.0.0` / `3081` | 代理监听地址 |
 | `DSH_TARGET_HOST` / `DSH_TARGET_PORT` | `127.0.0.1` / `3080` | 上游 dsh web 地址 |
 | `DSH_TLS_CERT` / `DSH_TLS_KEY` | （可选，须同设） | PEM 证书/私钥路径，设置后按 HTTPS 监听 |
+| `DSH_LAUNCHER` | 默认 `../app/www/index.html` | 启动页路径；`off` 关闭 Web 模式；显式路径不可读则启动失败 |
 
 ## 工作原理（简）
 
-- 所有 HTTP 请求与 WS 握手先过令牌门（`?token=` 登录种 Cookie / Cookie / Bearer 三选一），未通过一律 401/403。
+- 所有 HTTP 请求与 WS 握手先过令牌门（`?token=` 登录种 Cookie / Cookie / Bearer 三选一），未通过一律 401/403——例外是 Web 模式（ADR-0007）：未授权的 `GET /` 与 `/launch` 返回静态启动页（不含秘密），`/api`、WS 与 UI 资产仍全部有门。
 - 转发时把 Host 改写为 loopback 并剥离 Origin，使上游 `/api` 信任围栏按 loopback 语义通过；跨站防护由令牌门承担。
 - `GET /healthz` 无需令牌（`Access-Control-Allow-Origin: *`），只回答"代理活着"，供 App 启动页预检。
 
