@@ -1,0 +1,4 @@
+# Vendored release artifacts (compiler-generated headers inside signed
+# xcframeworks) ship upstream's exact bytes; whitespace lint must not
+# "fix" them — see mobile/docs/decisions/ADR-0005.
+** -whitespace
