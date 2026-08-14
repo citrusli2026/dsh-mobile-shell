@@ -11,7 +11,10 @@ let package = Package(
             targets: ["CapApp-SPM"])
     ],
     dependencies: [
-        .package(url: "https://github.com/ionic-team/capacitor-swift-pm.git", exact: "8.5.0")
+        // Vendored local copy of capacitor-swift-pm 8.5.0 (offline build;
+        // see mobile/docs/decisions/ADR-0005). To return to the upstream
+        // remote package: .package(url: "https://github.com/ionic-team/capacitor-swift-pm.git", exact: "8.5.0")
+        .package(path: "../../vendor/capacitor-swift-pm")
     ],
     targets: [
         .target(

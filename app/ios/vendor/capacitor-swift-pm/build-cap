@@ -1,0 +1,61 @@
+#!/usr/bin/env bash -eoux pipefail
+
+build_simulator() {
+	local SCHEME=$1
+	xcodebuild archive \
+		-scheme $SCHEME \
+		-workspace Capacitor.xcworkspace \
+		-destination "generic/platform=iOS Simulator" \
+		-configuration Debug \
+		-archivePath ./Build/$SCHEME-iOS-Simulator \
+		SKIP_INSTALL=NO \
+		BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
+		DEBUG_INFORMATION_FORMAT="dwarf-with-dsym"
+}
+
+build_ios() {
+	local SCHEME=$1
+	xcodebuild archive \
+		-scheme $SCHEME \
+		-workspace Capacitor.xcworkspace \
+		-destination "generic/platform=iOS" \
+		-archivePath ./Build/$SCHEME-iOS \
+		SKIP_INSTALL=NO \
+		SWIFT_SERIALIZE_DEBUGGING_OPTIONS=NO \
+		DEBUG_INFORMATION_FORMAT="dwarf-with-dsym" \
+		BUILD_LIBRARY_FOR_DISTRIBUTION=YES
+}
+
+create_xcframeworks() {
+	build_simulator Capacitor
+	build_simulator Cordova
+
+	build_ios Capacitor
+	build_ios Cordova
+
+	rm -rf ./Build/Capacitor-iOS-Simulator.xcarchive/Products/Library/Frameworks/Capacitor.framework/Frameworks
+	rm -rf ./Build/Capacitor-iOS.xcarchive/Products/Library/Frameworks/Capacitor.framework/Frameworks
+
+	xcodebuild -create-xcframework \
+		-framework ./Build/Capacitor-iOS-Simulator.xcarchive/Products/Library/Frameworks/Capacitor.framework \
+		-debug-symbols $PWD/Build/Capacitor-iOS-Simulator.xcarchive/dSYMs/Capacitor.framework.dSYM \
+		-framework ./Build/Capacitor-iOS.xcarchive/Products/Library/Frameworks/Capacitor.framework \
+		-debug-symbols $PWD/Build/Capacitor-iOS.xcarchive/dSYMs/Capacitor.framework.dSYM \
+		-output Capacitor.xcframework
+
+	xcodebuild -create-xcframework \
+		-framework ./Build/Cordova-iOS-Simulator.xcarchive/Products/Library/Frameworks/Cordova.framework \
+		-debug-symbols $PWD/Build/Cordova-iOS-Simulator.xcarchive/dSYMs/Cordova.framework.dSYM \
+		-framework ./Build/Cordova-iOS.xcarchive/Products/Library/Frameworks/Cordova.framework \
+		-debug-symbols $PWD/Build/Cordova-iOS.xcarchive/dSYMs/Cordova.framework.dSYM \
+		-output Cordova.xcframework
+}
+
+git clone https://github.com/ionic-team/capacitor capacitor-checkout
+cd capacitor-checkout/ios/Capacitor
+git checkout $1
+
+create_xcframeworks
+
+mv Capacitor.xcframework ../../../
+mv Cordova.xcframework ../../../
