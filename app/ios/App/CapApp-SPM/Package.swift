@@ -11,7 +11,7 @@ let package = Package(
             targets: ["CapApp-SPM"])
     ],
     dependencies: [
-        .package(url: "https://github.com/ionic-team/capacitor-swift-pm.git", exact: "8.5.0")
+        .package(path: "../../vendor/capacitor-swift-pm") // vendored (ADR-0005); restored by fix-spm-vendor — upstream was .package(url: "https://github.com/ionic-team/capacitor-swift-pm.git", exact: "8.5.0")
     ],
     targets: [
         .target(

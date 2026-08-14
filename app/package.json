@@ -5,7 +5,7 @@
   "description": "dsh-mobile: Capacitor shell connecting to a self-hosted DeepSeek Harness (dsh web) host",
   "type": "module",
   "scripts": {
-    "sync": "cap sync",
+    "sync": "cap sync && node ../scripts/fix-spm-vendor.mjs",
     "open:android": "cap open android",
     "open:ios": "cap open ios",
     "build:android": "cd android && ./gradlew assembleDebug",

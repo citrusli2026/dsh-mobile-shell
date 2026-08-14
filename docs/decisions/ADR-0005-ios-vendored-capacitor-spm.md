@@ -31,3 +31,7 @@ Capacitor 8 的 iOS 集成只走 SPM。其官方包 `ionic-team/capacitor-swift-
 ## 取代关系
 
 无。若 Capacitor 未来提供 npm 内嵌 xcframework 或 SPM registry 镜像支持，应重估。
+
+## 执行注记（2026-08-14 追加）
+
+`cap sync ios` 会重新生成 `CapApp-SPM/Package.swift`（文件头声明 "DO NOT MODIFY"），把本地路径依赖静默还原为 github.com 远程 URL——本 ADR 的离线保证曾被该行为悄悄撤销（阶段 2 期间实测复现）。对策：`scripts/fix-spm-vendor.mjs` 幂等恢复本地声明，已接入 `npm run sync`（app/package.json）与 CI 的 cap sync 步骤之后。手工执行 `npx cap sync ios` 后必须补跑该脚本。
