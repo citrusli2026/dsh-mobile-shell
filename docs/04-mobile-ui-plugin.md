@@ -47,7 +47,7 @@
 
 ## 4. 已知限制
 
-见插件 README（[en](../plugins/dsh-mobile-ui/README.md#known-limitations) / [zh](../plugins/dsh-mobile-ui/README.zh.md#已知限制))。要点：详情面板移动端不可达（布局冻结几何，需上游改动）;Hero 页无操作条（会话作用域座位）；存量组件内部密度属上游 PR 轨道，与本插件并行。
+见插件 README（[en](https://github.com/citrusli2026/dsh-mobile-ui#known-limitations) / [zh](https://github.com/citrusli2026/dsh-mobile-ui/blob/main/README.zh.md#已知限制))。要点：详情面板移动端不可达（布局冻结几何，需上游改动）;Hero 页无操作条（会话作用域座位）；存量组件内部密度属上游 PR 轨道，与本插件并行。
 
 ## 5. 后续任务
 

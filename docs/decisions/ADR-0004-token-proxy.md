@@ -11,7 +11,7 @@
 
 ## 决策
 
-1. **dsh web 永远绑定 127.0.0.1**（尊重上游安全立场），新建 `mobile/proxy/dsh-remote.mjs`：零依赖 Node 反代，监听 0.0.0.0:3081，对每一个 HTTP 请求与每一次 WebSocket 握手强制校验令牌，通过才转发到 loopback。
+1. **dsh web 永远绑定 127.0.0.1**（尊重上游安全立场），新建 `proxy/dsh-remote.mjs`：零依赖 Node 反代，监听 0.0.0.0:3081，对每一个 HTTP 请求与每一次 WebSocket 握手强制校验令牌，通过才转发到 loopback。
 2. **令牌三种出示方式**：`?token=` 登录（302 + 种 HttpOnly Cookie）、`dsh_token` Cookie（会话）、`Authorization: Bearer`（非浏览器客户端）。常量时间比较；未配置 `DSH_REMOTE_TOKEN` 直接拒绝启动。
 3. **转发时改写 Host 为 loopback、剥离 Origin**：让上游围栏在 loopback 语义下通过；跨站边界由代理的令牌门承担（Cookie `SameSite=Lax`）。`/healthz` 无认证但带 `Access-Control-Allow-Origin: *`，仅证明可达性，供 App 启动页预检。
 4. **PoC 阶段允许明文**：仅可信局域网/组网（Tailscale 等）使用；双端工程相应放开明文开关（Android `usesCleartextTraffic`、iOS `NSAllowsArbitraryLoads`），阶段 2 代理终结 TLS 后必须收回。

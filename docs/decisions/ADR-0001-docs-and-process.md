@@ -10,10 +10,10 @@
 
 ## 决策
 
-移动版项目的全部过程文档放在上游仓库内的新顶层目录 `mobile/docs/`：
+移动版项目的全部过程文档放在上游仓库内的新顶层目录 `docs/`：
 
-- `mobile/docs/` 存分析文档与本工作约定；
-- `mobile/docs/decisions/` 存 ADR；
+- `docs/` 存分析文档与本工作约定；
+- `docs/decisions/` 存 ADR；
 - 不改动上游 `docs/`、`.agents/notes/` 与任何门禁清单（如 `scripts/doc-budgets.manifest.json`）。
 
 后续在 GitHub 建立独立开源仓库时，`mobile/` 目录整体迁移过去，文档历史随之保留。

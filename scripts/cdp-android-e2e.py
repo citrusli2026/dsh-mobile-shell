@@ -1,7 +1,7 @@
 """Drive the dsh-mobile Android WebView through CDP: fill the launcher form,
 connect to the LAN host through dsh-remote, and report where the WebView lands.
 
-Usage: python mobile/scripts/cdp-android-e2e.py <host:port> <token>
+Usage: python scripts/cdp-android-e2e.py <host:port> <token>
 Requires: adb forward tcp:9222 already established for the app's WebView.
 """
 import json

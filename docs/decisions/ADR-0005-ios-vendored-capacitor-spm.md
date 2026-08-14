@@ -1,7 +1,7 @@
 # ADR-0005 iOS 依赖本地化：vendor capacitor-swift-pm 与本地 binaryTarget
 
 - 状态：已接受（2026-08-14）
-- 依据：阶段 1 PoC 构建实录（`mobile/.run/xcodebuild.log`）
+- 依据：阶段 1 PoC 构建实录（`.run/xcodebuild.log`）
 
 ## 背景
 
@@ -14,7 +14,7 @@ Capacitor 8 的 iOS 集成只走 SPM。其官方包 `ionic-team/capacitor-swift-
 
 ## 决策
 
-1. 将 `capacitor-swift-pm` 8.5.0 浅克隆并去 `.git` 化，vendor 到 `mobile/app/ios/vendor/capacitor-swift-pm/`；两个官方 xcframework 校验和后解压进同一目录。
+1. 将 `capacitor-swift-pm` 8.5.0 浅克隆并去 `.git` 化，vendor 到 `app/ios/vendor/capacitor-swift-pm/`；两个官方 xcframework 校验和后解压进同一目录。
 2. 改写其 `Package.swift`：`binaryTarget(url:)` → `binaryTarget(path:)` 本地目标；`CapApp-SPM/Package.swift` 的依赖从远程 URL 改为 `.package(path: "../../vendor/capacitor-swift-pm")`。构建全程零网络。
 3. 升级 Capacitor 大版本时：重新浅克隆对应 tag、重新下载校验 xcframework、核对上游 `Package.swift` 的 target 列表是否变化，一起提交。
 

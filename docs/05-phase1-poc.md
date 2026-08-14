@@ -6,10 +6,10 @@
 
 | 部件 | 位置 | 说明 |
 |---|---|---|
-| App 壳 | `mobile/app/` | Capacitor 8.5.0，启动页配对（地址+令牌、记忆、预检），进入主机伺服的原版 Web UI |
-| 令牌反代 | `mobile/proxy/dsh-remote.mjs` | 零依赖 Node ≥20；dsh web 保持 loopback，代理监听 3081 做令牌门（ADR-0004） |
-| iOS 离线依赖 | `mobile/app/ios/vendor/capacitor-swift-pm/` | 官方 8.5.0 xcframework，sha256 核验，本地 binaryTarget（ADR-0005） |
-| 验证脚本 | `mobile/scripts/cdp-android-e2e.py` | 经 CDP 驱动 Android WebView 自动完成配对并断言落点 |
+| App 壳 | `app/` | Capacitor 8.5.0，启动页配对（地址+令牌、记忆、预检），进入主机伺服的原版 Web UI |
+| 令牌反代 | `proxy/dsh-remote.mjs` | 零依赖 Node ≥20；dsh web 保持 loopback，代理监听 3081 做令牌门（ADR-0004） |
+| iOS 离线依赖 | `app/ios/vendor/capacitor-swift-pm/` | 官方 8.5.0 xcframework，sha256 核验，本地 binaryTarget（ADR-0005） |
+| 验证脚本 | `scripts/cdp-android-e2e.py` | 经 CDP 驱动 Android WebView 自动完成配对并断言落点 |
 
 ## 2. 运行（从仓库根）
 
@@ -18,16 +18,16 @@
 node apps/cli/lib/bin.js web --port 3080        # 或 pnpm dsh web
 
 # 代理（令牌自定，至少 8 位）
-DSH_REMOTE_TOKEN=<token> node mobile/proxy/dsh-remote.mjs
+DSH_REMOTE_TOKEN=<token> node proxy/dsh-remote.mjs
 
 # Android 构建（JDK 需 17–21；本机全局 Gradle 钉了 JDK25，需命令行覆盖）
-cd mobile/app && npm install                   # 慢则配 registry.npmmirror.com
+cd app && npm install                   # 慢则配 registry.npmmirror.com
 cd android && ./gradlew assembleDebug \
   -Dorg.gradle.java.home=$HOME/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home
-# 产物：mobile/app/android/app/build/outputs/apk/debug/app-debug.apk
+# 产物：app/android/app/build/outputs/apk/debug/app-debug.apk
 
 # iOS 构建（全离线；DEVELOPER_DIR 指向 Xcode）
-cd mobile/app && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
+cd app && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
   xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Debug \
   -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
   -derivedDataPath ios/build build
@@ -35,7 +35,7 @@ cd mobile/app && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
 
 App 启动页填 `http://<主机局域网IP>:3081` + 令牌即可连接。真机安装：Android 直接装 APK；iOS 需开发者签名（PoC 用模拟器，真机/TestFlight 属阶段 3）。
 
-## 3. 验证矩阵（证据：`mobile/.run/` 截图与日志，随验证时环境）
+## 3. 验证矩阵（证据：`.run/` 截图与日志，随验证时环境）
 
 | # | 用例 | 结果 |
 |---|---|---|
