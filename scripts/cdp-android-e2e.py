@@ -1,7 +1,10 @@
-"""Drive the dsh-mobile Android WebView through CDP: fill the launcher form,
-connect to the LAN host through dsh-remote, and report where the WebView lands.
+"""Drive the dsh-mobile Android WebView through CDP: fill the launcher and
+connect to the LAN host through dsh-remote, then report where the WebView
+lands.
 
-Usage: python scripts/cdp-android-e2e.py <host:port> <token>
+Usage:
+  python scripts/cdp-android-e2e.py token <host:port> <token>
+  python scripts/cdp-android-e2e.py pair  <host:port> <6-digit-code>
 Requires: adb forward tcp:9222 already established for the app's WebView.
 """
 import json
@@ -30,25 +33,38 @@ def evaluate(ws, expr):
 
 
 def main():
-    server, token = sys.argv[1], sys.argv[2]
+    mode, server, secret = sys.argv[1], sys.argv[2], sys.argv[3]
     targets = json.load(urllib.request.urlopen(f'{BASE}/json/list'))
     page = next(t for t in targets if t['type'] == 'page')
     ws = websocket.create_connection(page['webSocketDebuggerUrl'], timeout=30, suppress_origin=True)
 
     start_url = evaluate(ws, 'location.href')
-    evaluate(ws, f'''
-      document.getElementById('server').value = {json.dumps(server)};
-      document.getElementById('token').value = {json.dumps(token)};
-      document.getElementById('form').requestSubmit();
-      'submitted'
-    ''')
-    # The launcher health-checks /healthz, then navigates to ?token=...
-    time.sleep(8)
+    if mode == 'pair':
+        fill = f'''
+          document.getElementById('tabPair').click();
+          document.getElementById('pairServer').value = {json.dumps(server)};
+          document.getElementById('code').value = {json.dumps(secret)};
+          document.getElementById('pairForm').requestSubmit();
+          'submitted-pair'
+        '''
+    else:
+        fill = f'''
+          document.getElementById('tabToken').click();
+          document.getElementById('server').value = {json.dumps(server)};
+          document.getElementById('token').value = {json.dumps(secret)};
+          document.getElementById('tokenForm').requestSubmit();
+          'submitted-token'
+        '''
+    evaluate(ws, fill)
+    # The launcher health-checks /healthz, then (pair mode) redeems the code,
+    # then navigates to ?token=... which 302s into the session.
+    time.sleep(10)
     landed = evaluate(ws, 'location.href')
     title = evaluate(ws, 'document.title')
     body_hint = evaluate(ws, 'document.body ? document.body.innerText.slice(0, 200) : ""')
     ws.close()
     print(json.dumps({
+        'mode': mode,
         'start_url': start_url,
         'landed_url': landed,
         'title': title,
