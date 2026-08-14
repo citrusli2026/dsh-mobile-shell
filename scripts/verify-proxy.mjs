@@ -92,14 +92,22 @@ await check('healthz answers 200 with CORS * without a token', async () => {
   expect(res.headers.get('access-control-allow-origin') === '*', 'missing ACAO:*')
 })
 
-await check('GET / without token → 401', async () => {
+await check('GET / without token → launcher page (web mode, ADR-0007)', async () => {
   const res = await fetch(`${PROXY}/`, { redirect: 'manual' })
-  expect(res.status === 401, `HTTP ${res.status}`)
+  expect(res.status === 200, `HTTP ${res.status}`)
+  expect((await res.text()).includes('dsh-remote launcher'), 'launcher marker missing')
 })
 
-await check('GET / with a wrong token → 401', async () => {
+await check('GET / with a wrong token → launcher page (not the UI)', async () => {
   const res = await fetch(`${PROXY}/?token=wrong-token-value`, { redirect: 'manual' })
-  expect(res.status === 401, `HTTP ${res.status}`)
+  expect(res.status === 200, `HTTP ${res.status}`)
+  expect((await res.text()).includes('dsh-remote launcher'), 'launcher marker missing')
+})
+
+await check('GET /launch without token → launcher page', async () => {
+  const res = await fetch(`${PROXY}/launch`, { redirect: 'manual' })
+  expect(res.status === 200, `HTTP ${res.status}`)
+  expect((await res.text()).includes('dsh-remote launcher'), 'launcher marker missing')
 })
 
 await check('login with the right token → 302 + HttpOnly cookie', async () => {

@@ -47,3 +47,14 @@ jobs:
           sleep 1
           PROXY_URL=https://127.0.0.1:3082 DSH_VERIFY_INSECURE_TLS=1 \
             DSH_REMOTE_TOKEN=ci-test-token-123456 node scripts/verify-proxy.mjs
+
+      # ADR-0007: with the launcher disabled the proxy keeps its plain 401 face.
+      - name: Launcher-off variant (DSH_LAUNCHER=off)
+        run: |
+          DSH_REMOTE_TOKEN=ci-test-token-123456 DSH_LISTEN_PORT=3083 DSH_LAUNCHER=off \
+            node proxy/dsh-remote.mjs > proxy-nolauncher.log 2>&1 &
+          sleep 1
+          code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3083/)
+          [ "$code" = "401" ] || { echo "GET / expected 401, got $code"; cat proxy-nolauncher.log; exit 1; }
+          code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3083/launch)
+          [ "$code" = "404" ] || { echo "GET /launch expected 404, got $code"; exit 1; }
