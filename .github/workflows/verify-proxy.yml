@@ -1,6 +1,7 @@
 name: verify-proxy
 
 on:
+  workflow_dispatch: {}
   push:
     branches: [main]
     paths: ['proxy/**', 'scripts/**', '.github/workflows/verify-proxy.yml']
