@@ -1,4 +1,5 @@
 <!doctype html>
+<!-- dsh-remote launcher -->
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8" />
@@ -51,6 +52,8 @@
   .saved .host { font-weight: 600; word-break: break-all; }
   .saved .meta { color: var(--muted); font-size: 13px; margin-top: 2px; }
   .hidden { display: none; }
+  /* Web 模式（浏览器直开 dsh-remote）：主机就是当前源，地址输入不显示 */
+  body.web .server-field { display: none; }
 </style>
 </head>
 <body>
@@ -72,8 +75,9 @@
     </div>
 
     <form id="pairForm">
-      <label for="pairServer">主机地址</label>
-      <input id="pairServer" inputmode="url" autocapitalize="off" autocorrect="off"
+      <p class="hint hidden" id="webHostLine"></p>
+      <label for="pairServer" class="server-field">主机地址</label>
+      <input id="pairServer" class="server-field" inputmode="url" autocapitalize="off" autocorrect="off"
              placeholder="例如 192.168.1.10:3081" />
       <label for="code">配对码</label>
       <input id="code" inputmode="numeric" maxlength="6" autocomplete="one-time-code"
@@ -83,8 +87,8 @@
     </form>
 
     <form id="tokenForm" class="hidden">
-      <label for="server">主机地址</label>
-      <input id="server" inputmode="url" autocapitalize="off" autocorrect="off"
+      <label for="server" class="server-field">主机地址</label>
+      <input id="server" class="server-field" inputmode="url" autocapitalize="off" autocorrect="off"
              placeholder="例如 192.168.1.10:3081" />
       <label for="token">访问令牌（token）</label>
       <input id="token" type="password" autocapitalize="off" autocorrect="off"
@@ -99,6 +103,17 @@
 <script>
 const $ = (id) => document.getElementById(id)
 const STORE_KEY = 'dsh.connection'
+
+// 载体识别（ADR-0007）：Capacitor 会注入 window.Capacitor；纯浏览器打开
+// dsh-remote 时没有它，此时主机就是当前源，地址框隐藏，只需填配对码/令牌。
+const IS_APP = typeof window.Capacitor !== 'undefined'
+if (!IS_APP) {
+  document.body.classList.add('web')
+  $('pairServer').value = location.origin + '/'
+  $('server').value = location.origin + '/'
+  $('webHostLine').classList.remove('hidden')
+  $('webHostLine').textContent = '当前主机：' + location.host
+}
 
 function normalize(input) {
   let s = (input || '').trim()
@@ -211,7 +226,7 @@ $('tabToken').onclick = () => {
 $('pairForm').onsubmit = (e) => {
   e.preventDefault()
   let url
-  try { url = normalize($('pairServer').value) } catch (err) { say('err', err.message); return }
+  try { url = normalize(IS_APP ? $('pairServer').value : location.origin) } catch (err) { say('err', err.message); return }
   const code = $('code').value.trim()
   if (!/^\d{6}$/.test(code)) { say('err', '配对码是 6 位数字'); return }
   connectWithCode(url.origin + '/', code)
@@ -219,7 +234,7 @@ $('pairForm').onsubmit = (e) => {
 $('tokenForm').onsubmit = (e) => {
   e.preventDefault()
   let url
-  try { url = normalize($('server').value) } catch (err) { say('err', err.message); return }
+  try { url = normalize(IS_APP ? $('server').value : location.origin) } catch (err) { say('err', err.message); return }
   const token = $('token').value.trim()
   if (!token) { say('err', '请填写访问令牌'); return }
   connectWithToken(url.origin + '/', token)

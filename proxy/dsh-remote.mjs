@@ -41,16 +41,27 @@
  * WebViews; public deployments belong behind a real CA (Caddy/Let's
  * Encrypt). LANs stay plain HTTP + token.
  *
+ * Web mode (ADR-0007): when the launcher page is available, unauthenticated
+ * GET / (and /index.html) return the launcher instead of 401, and GET /launch
+ * always returns it — any browser can then pair via POST /pair and log in
+ * through ?token=. The gate is unchanged: /api, WebSocket upgrades and the
+ * real UI assets still require the token; the launcher is a static page with
+ * no secrets. Resolution: DSH_LAUNCHER=<path> (explicit; unreadable fails
+ * loud) → app/www/index.html next to this file (missing → off with a boot
+ * note) → DSH_LAUNCHER=off forces the plain 401 face.
+ *
  * Env:
  *   DSH_REMOTE_TOKEN (required)  shared secret; compared in constant time
  *   DSH_LISTEN_HOST   default 0.0.0.0      DSH_LISTEN_PORT  default 3081
  *   DSH_TARGET_HOST   default 127.0.0.1    DSH_TARGET_PORT  default 3080
  *   DSH_TLS_CERT / DSH_TLS_KEY  (optional, both required)  PEM file paths
+ *   DSH_LAUNCHER      (optional) launcher HTML path, or "off"
  */
 import http from 'node:http'
 import https from 'node:https'
 import crypto from 'node:crypto'
 import fs from 'node:fs'
+import { fileURLToPath } from 'node:url'
 
 const TOKEN = process.env.DSH_REMOTE_TOKEN
 if (!TOKEN || TOKEN.length < 8) {
@@ -75,6 +86,26 @@ const TLS = TLS_CERT_PATH !== undefined
   ? { cert: fs.readFileSync(TLS_CERT_PATH), key: fs.readFileSync(TLS_KEY_PATH) }
   : undefined
 const SCHEME = TLS ? 'https' : 'http'
+
+// Web mode (ADR-0007): serve the launcher page to unauthenticated browsers so
+// any phone/desktop browser can pair without installing the app. Resolution:
+// DSH_LAUNCHER=<path> (explicit; unreadable → fail loud) → repo-layout default
+// app/www/index.html (missing → off, with a boot note) → DSH_LAUNCHER=off.
+const LAUNCHER_ENV = process.env.DSH_LAUNCHER
+let LAUNCHER_HTML
+if (LAUNCHER_ENV !== 'off') {
+  const launcherPath = LAUNCHER_ENV ?? fileURLToPath(new URL('../app/www/index.html', import.meta.url))
+  try {
+    LAUNCHER_HTML = fs.readFileSync(launcherPath)
+    console.log(`dsh-remote: web mode on — launcher ${launcherPath}`)
+  } catch (error) {
+    if (LAUNCHER_ENV) {
+      console.error(`dsh-remote: DSH_LAUNCHER=${LAUNCHER_ENV} is not readable: ${error.message}`)
+      process.exit(1)
+    }
+    console.log('dsh-remote: web mode off — no launcher page found next to the repo layout')
+  }
+}
 
 /** Constant-time token comparison; length-mismatched candidates fail fast. */
 function tokenOk(candidate) {
@@ -243,6 +274,18 @@ async function handle(req, res) {
     return
   }
 
+  // Web mode (ADR-0007): /launch always serves the launcher when enabled —
+  // authenticated users land here to switch hosts.
+  if (url.pathname === '/launch' && req.method === 'GET') {
+    if (!LAUNCHER_HTML) {
+      reject(res, 404, '未启用 Web 模式')
+      return
+    }
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
+    res.end(LAUNCHER_HTML)
+    return
+  }
+
   // ── pairing endpoints (ADR-0006) ─────────────────────────────────────
   if (url.pathname === '/pair' && req.method === 'OPTIONS') {
     res.writeHead(204, CORS_HEADERS)
@@ -282,6 +325,13 @@ async function handle(req, res) {
     return
   }
   if (!tokenOk(readCookie(req, COOKIE_NAME)) && !tokenOk(bearerToken(req))) {
+    // Web mode (ADR-0007): the launcher is the unauthenticated face of /.
+    // Only the bare index paths — /api, WS and UI assets stay gated.
+    if (LAUNCHER_HTML && req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
+      res.end(LAUNCHER_HTML)
+      return
+    }
     reject(res, 401, '未授权')
     return
   }
