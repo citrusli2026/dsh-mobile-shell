@@ -36,3 +36,14 @@ jobs:
           DSH_REMOTE_TOKEN=ci-test-token-123456 node proxy/dsh-remote.mjs > proxy.log 2>&1 &
           sleep 1
           DSH_REMOTE_TOKEN=ci-test-token-123456 node scripts/verify-proxy.mjs
+
+      - name: Run the TLS variant of the matrix (self-signed test cert)
+        run: |
+          openssl req -x509 -newkey rsa:2048 -keyout tls-key.pem -out tls-cert.pem \
+            -days 1 -nodes -subj "/CN=dsh-remote-ci"
+          DSH_REMOTE_TOKEN=ci-test-token-123456 DSH_LISTEN_PORT=3082 \
+            DSH_TLS_CERT=$PWD/tls-cert.pem DSH_TLS_KEY=$PWD/tls-key.pem \
+            node proxy/dsh-remote.mjs > proxy-tls.log 2>&1 &
+          sleep 1
+          PROXY_URL=https://127.0.0.1:3082 DSH_VERIFY_INSECURE_TLS=1 \
+            DSH_REMOTE_TOKEN=ci-test-token-123456 node scripts/verify-proxy.mjs

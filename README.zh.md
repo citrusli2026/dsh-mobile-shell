@@ -25,9 +25,10 @@
 npx @deepseek-ai/dsh web --port 3080          # harness 照常跑在 loopback
 DSH_REMOTE_TOKEN=$(openssl rand -hex 16) node proxy/dsh-remote.mjs
 # dsh-remote: http://0.0.0.0:3081 -> http://127.0.0.1:3080 (token required)
+# dsh-remote: pairing code 847291 — single use, expires in 10 min
 ```
 
-**2. 在手机上**（同一 Wi-Fi）——安装 App，填 `http://<电脑局域网IP>:3081` 与同一个令牌：
+**2. 在手机上**（同一 Wi-Fi）——安装 App，填 `http://<电脑局域网IP>:3081` 与终端打印的**配对码**（主令牌全程不离开电脑；"令牌连接"保留为高级入口）：
 
 - **Android**：从 [Releases](../../releases) 直接下载 APK 安装。
 - **iOS**：从源码构建（见下）或等待 TestFlight——苹果没有免签名的直接安装路径。

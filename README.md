@@ -25,9 +25,10 @@ Companion plugin: [`dsh-mobile-ui`](https://github.com/citrusli2026/dsh-mobile-u
 npx @deepseek-ai/dsh web --port 3080          # the harness, loopback as usual
 DSH_REMOTE_TOKEN=$(openssl rand -hex 16) node proxy/dsh-remote.mjs
 # dsh-remote: http://0.0.0.0:3081 -> http://127.0.0.1:3080 (token required)
+# dsh-remote: pairing code 847291 — single use, expires in 10 min
 ```
 
-**2. On your phone** (same Wi-Fi) — install the app, enter `http://<computer-LAN-IP>:3081` and the same token:
+**2. On your phone** (same Wi-Fi) — install the app, enter `http://<computer-LAN-IP>:3081` and the printed **pairing code** (the master token never leaves your computer; token entry remains as an advanced option):
 
 - **Android**: download the APK from [Releases](../../releases) and install directly.
 - **iOS**: build from source (below) or join TestFlight when available — Apple has no direct-install path for unsigned builds.
