@@ -20,7 +20,15 @@
   main { width: 100%; max-width: 400px; }
   h1 { font-size: 28px; letter-spacing: .02em; }
   h1 span { color: var(--accent); }
-  .sub { color: var(--muted); margin: 6px 0 28px; }
+  .sub { color: var(--muted); margin: 6px 0 24px; }
+  .tabs { display: flex; gap: 8px; margin-bottom: 4px; }
+  .tabs button {
+    flex: 1; margin: 0; padding: 9px; font-size: 14px; font-weight: 500;
+    background: var(--panel); color: var(--muted); border: 1px solid var(--line);
+  }
+  .tabs button.active { color: var(--text); border-color: var(--accent); }
+  .tabs button:first-child { border-radius: 10px 0 0 10px; }
+  .tabs button:last-child { border-radius: 0 10px 10px 0; }
   label { display: block; color: var(--muted); font-size: 13px; margin: 18px 0 6px; }
   input {
     width: 100%; padding: 12px 14px; border-radius: 10px; font: inherit;
@@ -28,12 +36,14 @@
     outline: none;
   }
   input:focus { border-color: var(--accent); }
+  input#code { font-size: 22px; letter-spacing: .35em; text-align: center; }
   button {
     width: 100%; margin-top: 26px; padding: 13px; border: 0; border-radius: 10px;
     background: var(--accent); color: #fff; font: 600 16px/1 inherit; cursor: pointer;
   }
   button:disabled { opacity: .55; }
   .ghost { background: transparent; color: var(--muted); border: 1px solid var(--line); margin-top: 12px; }
+  .hint { color: var(--muted); font-size: 12.5px; margin-top: 10px; }
   .status { margin-top: 16px; font-size: 14px; min-height: 22px; }
   .status.ok { color: var(--ok); }
   .status.err { color: var(--err); }
@@ -55,15 +65,33 @@
     <button id="changeBtn" class="ghost">更换主机</button>
   </section>
 
-  <form id="form">
-    <label for="server">主机地址</label>
-    <input id="server" inputmode="url" autocapitalize="off" autocorrect="off"
-           placeholder="例如 192.168.1.10:3081" required />
-    <label for="token">访问令牌（token）</label>
-    <input id="token" type="password" autocapitalize="off" autocorrect="off"
-           placeholder="dsh-remote 代理上配置的令牌" required />
-    <button id="connectBtn" type="submit">连接</button>
-  </form>
+  <div id="picker">
+    <div class="tabs">
+      <button id="tabPair" class="active" type="button">配对码连接</button>
+      <button id="tabToken" type="button">令牌连接</button>
+    </div>
+
+    <form id="pairForm">
+      <label for="pairServer">主机地址</label>
+      <input id="pairServer" inputmode="url" autocapitalize="off" autocorrect="off"
+             placeholder="例如 192.168.1.10:3081" />
+      <label for="code">配对码</label>
+      <input id="code" inputmode="numeric" maxlength="6" autocomplete="one-time-code"
+             placeholder="· · · · · ·" />
+      <p class="hint">主机启动 dsh-remote 时会打印一个 6 位配对码（单次使用、10 分钟有效）。</p>
+      <button id="pairBtn" type="submit">配对并连接</button>
+    </form>
+
+    <form id="tokenForm" class="hidden">
+      <label for="server">主机地址</label>
+      <input id="server" inputmode="url" autocapitalize="off" autocorrect="off"
+             placeholder="例如 192.168.1.10:3081" />
+      <label for="token">访问令牌（token）</label>
+      <input id="token" type="password" autocapitalize="off" autocorrect="off"
+             placeholder="dsh-remote 代理上配置的令牌" />
+      <button id="connectBtn" type="submit">连接</button>
+    </form>
+  </div>
 
   <p id="status" class="status" role="status"></p>
 </main>
@@ -73,7 +101,7 @@ const $ = (id) => document.getElementById(id)
 const STORE_KEY = 'dsh.connection'
 
 function normalize(input) {
-  let s = input.trim()
+  let s = (input || '').trim()
   if (!s) throw new Error('请填写主机地址')
   if (!/^https?:\/\//i.test(s)) s = 'http://' + s
   const url = new URL(s)
@@ -100,50 +128,101 @@ async function healthcheck(base) {
   } finally { clearTimeout(timer) }
 }
 
-async function connect(base, token) {
-  const status = $('status'), btn = $('connectBtn'), cont = $('continueBtn')
-  status.className = 'status'; status.textContent = '正在检查主机…'
-  btn.disabled = cont.disabled = true
-  try {
-    await healthcheck(base)
-    save(base, token)
-    status.className = 'status ok'; status.textContent = '已连接，正在进入…'
-    // 经令牌代理进入：代理校验 token 后种下 HttpOnly Cookie 并跳转到 Web UI
-    location.assign(base + '?token=' + encodeURIComponent(token))
-  } catch (e) {
-    status.className = 'status err'
-    status.textContent = '连不上主机：' + (e.name === 'AbortError' ? '超时，请确认主机与手机在同一局域网' : e.message)
-  } finally {
-    btn.disabled = cont.disabled = false
-  }
+function setBusy(busy) {
+  for (const id of ['connectBtn', 'pairBtn', 'continueBtn']) $(id).disabled = busy
+}
+function say(kind, text) {
+  const el = $('status')
+  el.className = 'status' + (kind ? ' ' + kind : '')
+  el.textContent = text
+}
+function fail(e) {
+  say('err', e && e.name === 'AbortError' ? '连不上主机：超时，请确认主机与手机在同一局域网' : String(e.message || e))
 }
 
+async function enter(base, token) {
+  save(base, token)
+  say('ok', '已连接，正在进入…')
+  // 经令牌代理进入：代理校验 token 后种下 HttpOnly Cookie 并跳转到 Web UI
+  location.assign(base + '?token=' + encodeURIComponent(token))
+}
+
+async function connectWithToken(base, token) {
+  say('', '正在检查主机…'); setBusy(true)
+  try {
+    await healthcheck(base)
+    await enter(base, token)
+  } catch (e) { fail(e) } finally { setBusy(false) }
+}
+
+async function connectWithCode(base, code) {
+  say('', '正在兑换配对码…'); setBusy(true)
+  try {
+    await healthcheck(base)
+    const ctl = new AbortController()
+    const timer = setTimeout(() => ctl.abort(), 10000)
+    let res
+    try {
+      res = await fetch(base + 'pair', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ code }),
+        signal: ctl.signal,
+      })
+    } finally { clearTimeout(timer) }
+    if (res.status === 429) throw new Error('尝试过多，请稍后再试')
+    if (!res.ok) throw new Error('配对码无效或已过期')
+    const data = await res.json()
+    if (!data.token) throw new Error('主机响应异常')
+    await enter(base, data.token)
+  } catch (e) { fail(e) } finally { setBusy(false) }
+}
+
+// ── saved connection ─────────────────────────────────────────────────────
 const saved = load()
 if (saved && saved.base) {
   $('savedCard').classList.remove('hidden')
-  $('form').classList.add('hidden')
+  $('picker').classList.add('hidden')
   $('savedHost').textContent = saved.base
-  const host = new URL(saved.base).hostname
   $('server').value = saved.base
+  $('pairServer').value = saved.base
   $('token').value = saved.token || ''
-  $('continueBtn').onclick = () => connect(saved.base, $('token').value || saved.token)
+  $('continueBtn').onclick = () => connectWithToken(saved.base, $('token').value || saved.token)
   $('changeBtn').onclick = () => {
     $('savedCard').classList.add('hidden')
-    $('form').classList.remove('hidden')
+    $('picker').classList.remove('hidden')
     $('server').focus()
   }
 }
 
-$('form').onsubmit = (e) => {
+// ── mode tabs ────────────────────────────────────────────────────────────
+$('tabPair').onclick = () => {
+  $('tabPair').classList.add('active'); $('tabToken').classList.remove('active')
+  $('pairForm').classList.remove('hidden'); $('tokenForm').classList.add('hidden')
+  $('pairServer').focus()
+}
+$('tabToken').onclick = () => {
+  $('tabToken').classList.add('active'); $('tabPair').classList.remove('active')
+  $('tokenForm').classList.remove('hidden'); $('pairForm').classList.add('hidden')
+  $('server').focus()
+}
+
+// ── forms ────────────────────────────────────────────────────────────────
+$('pairForm').onsubmit = (e) => {
   e.preventDefault()
   let url
-  try { url = normalize($('server').value) } catch (err) {
-    $('status').className = 'status err'; $('status').textContent = err.message
-    return
-  }
+  try { url = normalize($('pairServer').value) } catch (err) { say('err', err.message); return }
+  const code = $('code').value.trim()
+  if (!/^\d{6}$/.test(code)) { say('err', '配对码是 6 位数字'); return }
+  connectWithCode(url.origin + '/', code)
+}
+$('tokenForm').onsubmit = (e) => {
+  e.preventDefault()
+  let url
+  try { url = normalize($('server').value) } catch (err) { say('err', err.message); return }
   const token = $('token').value.trim()
-  if (!token) { $('status').className = 'status err'; $('status').textContent = '请填写访问令牌'; return }
-  connect(url.origin + '/', token)
+  if (!token) { say('err', '请填写访问令牌'); return }
+  connectWithToken(url.origin + '/', token)
 }
 </script>
 </body>

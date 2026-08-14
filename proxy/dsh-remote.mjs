@@ -16,6 +16,15 @@
  *   2. `Cookie: dsh_token=<t>` — session requests after login.
  *   3. `Authorization: Bearer <t>` — non-browser clients.
  *
+ * Pairing (ADR-0006): phones exchange a short single-use code for the master
+ * token instead of typing it.
+ *   - `POST /pair/new` (master-token auth) mints a 6-digit code: single use,
+ *     10-minute TTL, minting requires the bearer/cookie master token.
+ *   - `POST /pair` (public, CORS `*` incl. OPTIONS preflight) trades a valid
+ *     code for `{token}`; wrong/expired codes 403, per-source-IP attempts
+ *     limited to 10/min (429 beyond).
+ *   - One initial code is printed at startup.
+ *
  * `GET /healthz` answers 200 without auth (with `Access-Control-Allow-
  * Origin: *`) so the app launcher can precheck reachability from its own
  * origin; it exposes nothing beyond "the proxy is up".
@@ -26,16 +35,22 @@
  * have `Origin` stripped — the proxy's token gate is the cross-site boundary
  * upstream deliberately does not provide.
  *
+ * TLS (ADR-0006): when DSH_TLS_CERT and DSH_TLS_KEY are both set, the proxy
+ * serves HTTPS (WSS on the same port; session cookie gains `Secure`). Certs
+ * are always user-supplied — self-signed certs are unusable in stock
+ * WebViews; public deployments belong behind a real CA (Caddy/Let's
+ * Encrypt). LANs stay plain HTTP + token.
+ *
  * Env:
  *   DSH_REMOTE_TOKEN (required)  shared secret; compared in constant time
  *   DSH_LISTEN_HOST   default 0.0.0.0      DSH_LISTEN_PORT  default 3081
  *   DSH_TARGET_HOST   default 127.0.0.1    DSH_TARGET_PORT  default 3080
- *
- * Plain HTTP only by design: phase 2 terminates TLS here (ADR-0004); until
- * then deploy on trusted LANs / mesh VPNs only.
+ *   DSH_TLS_CERT / DSH_TLS_KEY  (optional, both required)  PEM file paths
  */
 import http from 'node:http'
+import https from 'node:https'
 import crypto from 'node:crypto'
+import fs from 'node:fs'
 
 const TOKEN = process.env.DSH_REMOTE_TOKEN
 if (!TOKEN || TOKEN.length < 8) {
@@ -49,12 +64,58 @@ const TARGET_PORT = Number(process.env.DSH_TARGET_PORT ?? 3080)
 const TARGET_AUTHORITY = `${TARGET_HOST}:${TARGET_PORT}`
 const COOKIE_NAME = 'dsh_token'
 
+// Optional TLS (ADR-0006): both PEM paths required, loaded at boot, fail loud.
+const TLS_CERT_PATH = process.env.DSH_TLS_CERT
+const TLS_KEY_PATH = process.env.DSH_TLS_KEY
+if ((TLS_CERT_PATH === undefined) !== (TLS_KEY_PATH === undefined)) {
+  console.error('dsh-remote: DSH_TLS_CERT and DSH_TLS_KEY must be set together')
+  process.exit(1)
+}
+const TLS = TLS_CERT_PATH !== undefined
+  ? { cert: fs.readFileSync(TLS_CERT_PATH), key: fs.readFileSync(TLS_KEY_PATH) }
+  : undefined
+const SCHEME = TLS ? 'https' : 'http'
+
 /** Constant-time token comparison; length-mismatched candidates fail fast. */
 function tokenOk(candidate) {
   if (typeof candidate !== 'string' || candidate.length === 0) return false
   const a = Buffer.from(candidate)
   const b = Buffer.from(TOKEN)
   return a.length === b.length && crypto.timingSafeEqual(a, b)
+}
+
+// ── pairing codes (ADR-0006) ─────────────────────────────────────────────
+const PAIR_CODE_TTL_MS = 10 * 60 * 1000
+const PAIR_RATE_WINDOW_MS = 60 * 1000
+const PAIR_RATE_MAX = 10
+/** @type {Map<string, number>} code → expiry epoch ms */
+const pairCodes = new Map()
+/** @type {Map<string, {count: number, resetAt: number}>} source IP → attempts */
+const pairAttempts = new Map()
+
+function mintPairCode() {
+  const code = String(crypto.randomInt(0, 1_000_000)).padStart(6, '0')
+  pairCodes.set(code, Date.now() + PAIR_CODE_TTL_MS)
+  return code
+}
+
+/** Redeem a code; single-use and expiry enforced. @returns {boolean} */
+function redeemPairCode(code) {
+  const expiry = pairCodes.get(code)
+  if (expiry === undefined) return false
+  pairCodes.delete(code)
+  return expiry > Date.now()
+}
+
+function pairRateLimited(ip) {
+  const now = Date.now()
+  const entry = pairAttempts.get(ip)
+  if (entry === undefined || entry.resetAt <= now) {
+    pairAttempts.set(ip, { count: 1, resetAt: now + PAIR_RATE_WINDOW_MS })
+    return false
+  }
+  entry.count += 1
+  return entry.count > PAIR_RATE_MAX
 }
 
 function readCookie(req, name) {
@@ -73,8 +134,10 @@ function bearerToken(req) {
 }
 
 function sessionCookie() {
-  // No Secure flag: LAN deployments are plain HTTP until phase-2 TLS (ADR-0004).
-  return `${COOKIE_NAME}=${TOKEN}; HttpOnly; SameSite=Lax; Path=/`
+  // Secure only under TLS (ADR-0006): a Secure cookie on plain HTTP would
+  // never be stored by the WebView.
+  const secure = TLS ? '; Secure' : ''
+  return `${COOKIE_NAME}=${TOKEN}; HttpOnly; SameSite=Lax; Path=/${secure}`
 }
 
 function stripTokenParam(url) {
@@ -129,8 +192,46 @@ function forwardHttp(req, res, path) {
   req.pipe(upstream)
 }
 
-const server = http.createServer((req, res) => {
-  const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`)
+const CORS_HEADERS = {
+  'access-control-allow-origin': '*',
+  'access-control-allow-methods': 'POST, OPTIONS',
+  'access-control-allow-headers': 'content-type',
+}
+
+function json(res, code, body, extraHeaders = {}) {
+  res.writeHead(code, { 'content-type': 'application/json', ...extraHeaders })
+  res.end(JSON.stringify(body))
+}
+
+/** Read a small JSON body (≤64 KiB); resolves undefined on malformed input. */
+function readJsonBody(req) {
+  return new Promise((resolve) => {
+    let size = 0
+    const chunks = []
+    req.on('data', (chunk) => {
+      size += chunk.length
+      if (size > 64 * 1024) {
+        req.destroy()
+        resolve(undefined)
+        return
+      }
+      chunks.push(chunk)
+    })
+    req.on('end', () => {
+      try {
+        resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')))
+      } catch {
+        resolve(undefined)
+      }
+    })
+    req.on('error', () => resolve(undefined))
+  })
+}
+
+const server = (TLS ? https.createServer(TLS, handle) : http.createServer(handle))
+
+async function handle(req, res) {
+  const url = new URL(req.url ?? '/', `${SCHEME}://${req.headers.host ?? 'localhost'}`)
 
   if (url.pathname === '/healthz') {
     res.writeHead(200, {
@@ -139,6 +240,37 @@ const server = http.createServer((req, res) => {
       'cache-control': 'no-store',
     })
     res.end('{"ok":true}')
+    return
+  }
+
+  // ── pairing endpoints (ADR-0006) ─────────────────────────────────────
+  if (url.pathname === '/pair' && req.method === 'OPTIONS') {
+    res.writeHead(204, CORS_HEADERS)
+    res.end()
+    return
+  }
+  if (url.pathname === '/pair' && req.method === 'POST') {
+    const ip = req.socket.remoteAddress ?? 'unknown'
+    if (pairRateLimited(ip)) {
+      json(res, 429, { error: 'too_many_attempts' }, CORS_HEADERS)
+      return
+    }
+    const body = await readJsonBody(req)
+    const code = typeof body?.code === 'string' ? body.code.trim() : ''
+    if (!/^\d{6}$/.test(code) || !redeemPairCode(code)) {
+      json(res, 403, { error: 'invalid_or_expired_code' }, CORS_HEADERS)
+      return
+    }
+    json(res, 200, { token: TOKEN }, CORS_HEADERS)
+    return
+  }
+  if (url.pathname === '/pair/new' && req.method === 'POST') {
+    if (!tokenOk(readCookie(req, COOKIE_NAME)) && !tokenOk(bearerToken(req))) {
+      json(res, 401, { error: 'unauthorized' })
+      return
+    }
+    const code = mintPairCode()
+    json(res, 200, { code, expiresInSeconds: PAIR_CODE_TTL_MS / 1000 })
     return
   }
 
@@ -154,7 +286,7 @@ const server = http.createServer((req, res) => {
     return
   }
   forwardHttp(req, res, stripTokenParam(url))
-})
+}
 
 server.on('upgrade', (req, socket, head) => {
   const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`)
@@ -205,5 +337,7 @@ server.headersTimeout = 0
 server.timeout = 0
 
 server.listen(LISTEN_PORT, LISTEN_HOST, () => {
-  console.log(`dsh-remote: http://${LISTEN_HOST}:${LISTEN_PORT} -> http://${TARGET_AUTHORITY} (token required)`)
+  console.log(`dsh-remote: ${SCHEME}://${LISTEN_HOST}:${LISTEN_PORT} -> http://${TARGET_AUTHORITY} (token required)`)
+  console.log(`dsh-remote: pairing code ${mintPairCode()} — single use, expires in 10 min`)
+  console.log('dsh-remote: mint more with  curl -X POST -H "Authorization: Bearer $DSH_REMOTE_TOKEN" <this-url>/pair/new')
 })

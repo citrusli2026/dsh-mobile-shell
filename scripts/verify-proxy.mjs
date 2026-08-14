@@ -13,6 +13,7 @@
  * http://127.0.0.1:3080), DSH_REMOTE_TOKEN (required).
  */
 import net from 'node:net'
+import tls from 'node:tls'
 
 const PROXY = process.env.PROXY_URL ?? 'http://127.0.0.1:3081'
 const UPSTREAM = process.env.UPSTREAM_URL ?? 'http://127.0.0.1:3080'
@@ -21,6 +22,13 @@ if (!TOKEN) {
   console.error('DSH_REMOTE_TOKEN is required')
   process.exit(2)
 }
+// Self-signed test certs (CI TLS variant): DSH_VERIFY_INSECURE_TLS=1 disables
+// chain verification for this process only. Never set this against real hosts.
+if (process.env.DSH_VERIFY_INSECURE_TLS === '1') {
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
+  console.log('note: TLS verification disabled (DSH_VERIFY_INSECURE_TLS=1)')
+}
+const SECURE = PROXY.startsWith('https:')
 
 let failures = 0
 async function check(name, fn) {
@@ -40,7 +48,7 @@ function expect(cond, message) {
 function wsHandshakeStatus(url, headers) {
   return new Promise((resolve, reject) => {
     const target = new URL(url)
-    const socket = net.connect(Number(target.port), target.hostname, () => {
+    const onConnect = (socket) => {
       const lines = Object.entries({
         host: target.host,
         connection: 'Upgrade',
@@ -50,21 +58,26 @@ function wsHandshakeStatus(url, headers) {
         ...headers,
       }).map(([k, v]) => `${k}: ${v}`).join('\r\n')
       socket.write(`GET ${target.pathname} HTTP/1.1\r\n${lines}\r\n\r\n`)
-    })
-    let data = ''
-    socket.on('data', (chunk) => {
-      data += chunk
-      const match = /^HTTP\/1\.1 (\d+)/.exec(data)
-      if (match) {
+      let data = ''
+      socket.on('data', (chunk) => {
+        data += chunk
+        const match = /^HTTP\/1\.1 (\d+)/.exec(data)
+        if (match) {
+          socket.destroy()
+          resolve(Number(match[1]))
+        }
+      })
+      socket.on('error', reject)
+      socket.setTimeout(8000, () => {
         socket.destroy()
-        resolve(Number(match[1]))
-      }
-    })
-    socket.on('error', reject)
-    socket.setTimeout(8000, () => {
-      socket.destroy()
-      reject(new Error('ws handshake timeout'))
-    })
+        reject(new Error('ws handshake timeout'))
+      })
+    }
+    if (SECURE) {
+      onConnect(tls.connect(Number(target.port), target.hostname, { rejectUnauthorized: false }))
+    } else {
+      onConnect(net.connect(Number(target.port), target.hostname))
+    }
   })
 }
 
@@ -130,6 +143,74 @@ await check('WS handshake without token → 403', async () => {
 await check('WS handshake with cookie → 101', async () => {
   const status = await wsHandshakeStatus(`${PROXY}/api/events.mux`, session)
   expect(status === 101, `HTTP ${status}`)
+})
+
+// ── pairing (ADR-0006) ───────────────────────────────────────────────────
+
+await check('POST /pair/new without master token → 401', async () => {
+  const res = await fetch(`${PROXY}/pair/new`, { method: 'POST' })
+  expect(res.status === 401, `HTTP ${res.status}`)
+})
+
+let mintedCode = ''
+await check('POST /pair/new with master token → 6-digit code', async () => {
+  const res = await fetch(`${PROXY}/pair/new`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${TOKEN}` },
+  })
+  expect(res.status === 200, `HTTP ${res.status}`)
+  const body = await res.json()
+  expect(/^\d{6}$/.test(body.code ?? ''), `code shape: ${JSON.stringify(body)}`)
+  mintedCode = body.code
+})
+
+await check('OPTIONS /pair → 204 with CORS allow headers', async () => {
+  const res = await fetch(`${PROXY}/pair`, { method: 'OPTIONS' })
+  expect(res.status === 204, `HTTP ${res.status}`)
+  expect(res.headers.get('access-control-allow-origin') === '*', 'missing ACAO:*')
+})
+
+await check('POST /pair with a wrong code → 403', async () => {
+  const wrong = mintedCode === '999999' ? '888888' : '999999'
+  const res = await fetch(`${PROXY}/pair`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ code: wrong }),
+  })
+  expect(res.status === 403, `HTTP ${res.status}`)
+})
+
+await check('POST /pair with the minted code → the master token', async () => {
+  const res = await fetch(`${PROXY}/pair`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ code: mintedCode }),
+  })
+  expect(res.status === 200, `HTTP ${res.status}`)
+  const body = await res.json()
+  expect(body.token === TOKEN, 'returned token mismatch')
+})
+
+await check('redeemed code is single-use (replay → 403)', async () => {
+  const res = await fetch(`${PROXY}/pair`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ code: mintedCode }),
+  })
+  expect(res.status === 403, `HTTP ${res.status}`)
+})
+
+await check('pairing attempts are rate-limited (burst → 429)', async () => {
+  let saw429 = false
+  for (let i = 0; i < 12; i += 1) {
+    const res = await fetch(`${PROXY}/pair`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ code: '000000' }),
+    })
+    if (res.status === 429) saw429 = true
+  }
+  expect(saw429, 'no 429 after a 12-attempt burst')
 })
 
 if (failures > 0) {
