@@ -1,0 +1,37 @@
+name: verify-proxy
+
+on:
+  push:
+    branches: [main]
+    paths: ['proxy/**', 'scripts/**', '.github/workflows/verify-proxy.yml']
+  pull_request:
+    paths: ['proxy/**', 'scripts/**', '.github/workflows/verify-proxy.yml']
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # dsh engines: node ^22.19 || >=24
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install the published dsh CLI
+        run: npm install -g @deepseek-ai/dsh
+
+      - name: Start dsh web (loopback)
+        run: |
+          dsh web --port 3080 > dsh.log 2>&1 &
+          for i in $(seq 1 60); do
+            curl -sf -o /dev/null http://127.0.0.1:3080/ && exit 0
+            sleep 1
+          done
+          echo "dsh web did not become ready"; cat dsh.log; exit 1
+
+      - name: Start dsh-remote and run the smoke matrix
+        run: |
+          DSH_REMOTE_TOKEN=ci-test-token-123456 node proxy/dsh-remote.mjs > proxy.log 2>&1 &
+          sleep 1
+          DSH_REMOTE_TOKEN=ci-test-token-123456 node scripts/verify-proxy.mjs

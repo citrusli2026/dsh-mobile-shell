@@ -1,0 +1,45 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  android:
+    uses: ./.github/workflows/build-android.yml
+
+  ios:
+    uses: ./.github/workflows/build-ios.yml
+
+  publish:
+    needs: [android, ios]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Normalize artifact names
+        run: |
+          mkdir -p release
+          cp dist/dsh-mobile-android-debug-apk/app-debug.apk \
+            "release/dsh-mobile-shell-${GITHUB_REF_NAME}-android-debug.apk"
+          cp dist/dsh-mobile-ios-simulator-app/DSH-simulator.app.zip \
+            "release/dsh-mobile-shell-${GITHUB_REF_NAME}-ios-simulator.app.zip"
+          ls -la release
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          generate_release_notes: true
+          body: |
+            Android：直接下载 APK 安装。iOS：当前为模拟器包，真机/TestFlight 见路线图阶段 3。
+
+            国内下载加速：在 Release 资产 URL 前加 `https://ghproxy.net/` 前缀。
+
+            Android: install the APK directly. iOS: simulator build for now — device distribution (TestFlight) is phase 3.
+
+            China mirror: prefix any asset URL with `https://ghproxy.net/`.

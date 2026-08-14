@@ -1,0 +1,46 @@
+name: build-android
+
+on:
+  push:
+    branches: [main]
+    paths: ['app/**', '.github/workflows/build-android.yml']
+  pull_request:
+    paths: ['app/**', '.github/workflows/build-android.yml']
+  workflow_call: {}
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # JDK 21: Gradle 8.14.x's Groovy cannot run on JDK 25; AGP 8.13 needs 17+.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      # The committed gradle-wrapper.properties points at the Tencent mirror so
+      # local builds in mainland networks are fast; it is reachable from GitHub
+      # runners too. AGP and maven deps prefer the Aliyun mirrors committed in
+      # app/android/build.gradle, falling back to google()/mavenCentral().
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 36
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Install JS dependencies
+        run: npm ci --prefix app
+
+      - name: Assemble debug APK
+        run: ./gradlew assembleDebug --console=plain
+        working-directory: app/android
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dsh-mobile-android-debug-apk
+          path: app/android/app/build/outputs/apk/debug/app-debug.apk

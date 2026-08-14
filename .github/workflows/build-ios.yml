@@ -1,0 +1,42 @@
+name: build-ios
+
+on:
+  push:
+    branches: [main]
+    paths: ['app/ios/**', 'app/www/**', 'app/capacitor.config.ts', '.github/workflows/build-ios.yml']
+  pull_request:
+    paths: ['app/ios/**', 'app/www/**', 'app/capacitor.config.ts', '.github/workflows/build-ios.yml']
+  workflow_call: {}
+
+jobs:
+  ios:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # No network beyond npm: Capacitor's SPM binaries are vendored under
+      # app/ios/vendor/ (sha256-verified, ADR-0005), so xcodebuild never
+      # touches github.com release downloads.
+      - name: Install JS dependencies
+        run: npm ci --prefix app
+
+      - name: Build for iOS Simulator
+        run: >-
+          xcodebuild -project app/ios/App/App.xcodeproj -scheme App
+          -configuration Debug -sdk iphonesimulator
+          -destination 'generic/platform=iOS Simulator'
+          -derivedDataPath app/ios/build
+          CODE_SIGNING_ALLOWED=NO build
+
+      - name: Zip simulator app
+        run: ditto -c -k --sequesterRsrc App.app "$GITHUB_WORKSPACE/DSH-simulator.app.zip"
+        working-directory: app/ios/build/Build/Products/Debug-iphonesimulator
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dsh-mobile-ios-simulator-app
+          path: DSH-simulator.app.zip
