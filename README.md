@@ -10,9 +10,9 @@ A community, open-source **mobile shell** for [DeepSeek Harness](https://github.
 
 | Path | What it is |
 |---|---|
-| [`app/`](app/) | Capacitor 8 shell for Android & iOS: a pairing launcher (host + token, remembered), then the WebView loads the exact frontend your host serves — app and host versions never diverge |
+| [`app/`](app/) | Capacitor 8 shell for Android & iOS: a pairing launcher (host + scoped device session, remembered), then the WebView loads the exact frontend your host serves — app and host versions never diverge |
 | [`proxy/`](proxy/) | `dsh-remote`: a zero-dependency Node ≥20 reverse proxy. `dsh web` stays on loopback (upstream deliberately refuses `0.0.0.0`); the proxy owns network reachability, a constant-time token gate for every HTTP request and WebSocket handshake, and serves the launcher page itself (web mode, ADR-0007) |
-| [`scripts/`](scripts/) | Verification tooling (CDP-driven Android E2E, proxy smoke matrix) |
+| [`scripts/`](scripts/) | Verification tooling (launcher regression, real-dsh HTTP/HTTPS/WSS proxy matrix, and CDP-driven Android E2E) |
 | [`docs/`](docs/) | Analysis, feasibility study, PoC runbook, and every design decision as ADRs |
 
 Companion plugin: [`dsh-mobile-ui`](https://github.com/citrusli2026/dsh-mobile-ui) — mobile navigation chrome (bottom bar, session drawer) as an out-of-tree client plugin for the host's web UI. The shell works without it; the plugin works without the shell.
@@ -35,6 +35,8 @@ DSH_REMOTE_TOKEN=$(openssl rand -hex 16) node proxy/dsh-remote.mjs
   - **Android**: download the APK from [Releases](../../releases) and install directly.
   - **iOS**: build from source (below) or join TestFlight when available — Apple has no direct-install path for unsigned builds.
 
+> **Web verification status (2026-08-15): passed.** The published `dsh web` completed the HTTP 27/27 and HTTPS/WSS 27/27 automated matrices. A real Chromium run also passed the full flow: open launcher → enter a real pairing code → land in DeepSeek Harness → reload with the session intact. See the [Web hardening and verification report](docs/09-web-security-hardening.md). This result does not claim that the mobile app has completed its next verification stage.
+
 ## Build from source
 
 ```sh
@@ -56,7 +58,7 @@ Slow downloads? China-mirror configurations for npm / Gradle / Maven / Node head
 
 ## Security model — read before exposing anything
 
-- The token is the only authentication; the proxy enforces it on every request and WS handshake, and refuses to start without `DSH_REMOTE_TOKEN`. Unauthenticated visitors see only the launcher page (web mode) — `/api`, WebSocket and the real UI stay gated; disable with `DSH_LAUNCHER=off` if you prefer a bare 401.
+- The proxy authenticates every request and WS handshake and refuses to start without the host-only master secret `DSH_REMOTE_TOKEN`. Pairing issues a signed 30-day device session: browsers receive only an HttpOnly cookie, while the master secret never enters a response body, URL, or browser storage. Device sessions cannot mint more pairing codes, and authenticated cross-origin API/WS requests are rejected. Unauthenticated visitors see only the launcher page; disable it with `DSH_LAUNCHER=off` if you prefer a bare 401.
 - **Plain HTTP by default**: use it on trusted LANs or mesh VPNs (Tailscale…) only. For public exposure, TLS is available but **you supply the certificate** (`DSH_TLS_CERT`/`DSH_TLS_KEY` — a domain cert from a real CA; self-signed is unusable in stock WebViews, see ADR-0006).
 - The Android/iOS projects allow cleartext traffic for the LAN case; tighten both switches behind TLS (ADR-0004).
 
@@ -66,12 +68,13 @@ Slow downloads? China-mirror configurations for npm / Gradle / Maven / Node head
 |---|---|---|
 | 1 | PoC: shell + token proxy, LAN verification on both emulators | ✅ done ([report](docs/05-phase1-poc.md)) |
 | 2 | Pairing codes, optional TLS at the proxy | ✅ done ([report](docs/06-phase2-pairing-tls.md)) |
+| Web | Zero-install browser flow, device sessions, and security hardening | ✅ done and E2E verified ([report](docs/09-web-security-hardening.md)) |
 | 3 | Mobile UI polish (via `dsh-mobile-ui`), offline bundled assets, TestFlight / stores | in progress — [real-device checklist](docs/07-real-device-verification.md) |
 
 ## Documentation
 
 - [docs/README.md](docs/README.md) — full index: project analysis, build/dependency guide, feasibility study, PoC runbook
-- [docs/decisions/](docs/decisions/) — ADR-0001…0007, one per consequential choice
+- [docs/decisions/](docs/decisions/) — ADR-0001…0008, one per consequential choice
 
 ## License
 

@@ -5,6 +5,9 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <meta name="color-scheme" content="dark" />
+<meta name="referrer" content="no-referrer" />
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src http: https:; base-uri 'none'; form-action 'self'" />
 <title>DSH — 连接主机</title>
 <style>
   :root {
@@ -116,14 +119,18 @@ if (!IS_APP) {
 }
 
 function normalize(input) {
-  let s = (input || '').trim()
-  if (!s) throw new Error('请填写主机地址')
-  if (!/^https?:\/\//i.test(s)) s = 'http://' + s
+  const raw = (input || '').trim()
+  if (!raw) throw new Error('请填写主机地址')
+  const hasScheme = /^https?:\/\//i.test(raw)
+  const s = hasScheme ? raw : 'http://' + raw
   const url = new URL(s)
   if (!url.hostname) throw new Error('主机地址无效')
-  if (!url.port) url.port = '3081'
+  // Bare LAN hosts keep the convenient proxy default. An explicit scheme
+  // keeps its standard port (http:80 / https:443) instead of being rewritten.
+  if (!hasScheme && !url.port) url.port = '3081'
   url.pathname = '/'
   url.search = ''
+  url.hash = ''
   return url
 }
 
@@ -131,7 +138,11 @@ function load() {
   try { return JSON.parse(localStorage.getItem(STORE_KEY) || 'null') } catch { return null }
 }
 function save(base, token) {
-  localStorage.setItem(STORE_KEY, JSON.stringify({ base, token, at: Date.now() }))
+  const connection = { base, at: Date.now() }
+  // Browsers keep only an HttpOnly cookie. The bundled App may retain a scoped
+  // device token at its private launcher origin for one-tap reconnect.
+  if (IS_APP && token) connection.token = token
+  localStorage.setItem(STORE_KEY, JSON.stringify(connection))
 }
 
 async function healthcheck(base) {
@@ -155,18 +166,32 @@ function fail(e) {
   say('err', e && e.name === 'AbortError' ? '连不上主机：超时，请确认主机与手机在同一局域网' : String(e.message || e))
 }
 
-async function enter(base, token) {
+function enterWithAppToken(base, token) {
   save(base, token)
   say('ok', '已连接，正在进入…')
-  // 经令牌代理进入：代理校验 token 后种下 HttpOnly Cookie 并跳转到 Web UI
-  location.assign(base + '?token=' + encodeURIComponent(token))
+  // The fragment never reaches HTTP access logs. The remote launcher consumes
+  // it through POST /session, clears it, then enters the authenticated UI.
+  location.assign(base + '#dsh-session=' + encodeURIComponent(token))
+}
+
+async function establishWebSession(base, token) {
+  const res = await fetch(base + 'session', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ token }),
+  })
+  if (!res.ok) throw new Error('访问令牌无效')
+  save(base)
+  say('ok', '已连接，正在进入…')
+  location.assign(base)
 }
 
 async function connectWithToken(base, token) {
   say('', '正在检查主机…'); setBusy(true)
   try {
     await healthcheck(base)
-    await enter(base, token)
+    if (IS_APP) enterWithAppToken(base, token)
+    else await establishWebSession(base, token)
   } catch (e) { fail(e) } finally { setBusy(false) }
 }
 
@@ -180,7 +205,10 @@ async function connectWithCode(base, code) {
     try {
       res = await fetch(base + 'pair', {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: {
+          'content-type': 'application/json',
+          ...(IS_APP ? { 'x-dsh-client': 'app' } : {}),
+        },
         body: JSON.stringify({ code }),
         signal: ctl.signal,
       })
@@ -188,8 +216,14 @@ async function connectWithCode(base, code) {
     if (res.status === 429) throw new Error('尝试过多，请稍后再试')
     if (!res.ok) throw new Error('配对码无效或已过期')
     const data = await res.json()
-    if (!data.token) throw new Error('主机响应异常')
-    await enter(base, data.token)
+    if (IS_APP) {
+      if (!data.token) throw new Error('主机响应异常')
+      enterWithAppToken(base, data.token)
+    } else {
+      save(base)
+      say('ok', '已配对，正在进入…')
+      location.assign(base)
+    }
   } catch (e) { fail(e) } finally { setBusy(false) }
 }
 
@@ -202,12 +236,32 @@ if (saved && saved.base) {
   $('server').value = saved.base
   $('pairServer').value = saved.base
   $('token').value = saved.token || ''
-  $('continueBtn').onclick = () => connectWithToken(saved.base, $('token').value || saved.token)
+  $('continueBtn').onclick = () => {
+    if (IS_APP) connectWithToken(saved.base, $('token').value || saved.token)
+    else location.assign(saved.base)
+  }
   $('changeBtn').onclick = () => {
     $('savedCard').classList.add('hidden')
     $('picker').classList.remove('hidden')
     $('server').focus()
   }
+}
+
+// App-to-remote session handoff. The device token is carried only in a URL
+// fragment, immediately removed, and exchanged for an HttpOnly cookie.
+const fragment = new URLSearchParams(location.hash.slice(1))
+const fragmentToken = fragment.get('dsh-session')
+if (fragmentToken) {
+  history.replaceState(null, '', location.pathname + location.search)
+  say('', '正在建立安全会话…')
+  fetch(location.origin + '/session', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ token: fragmentToken }),
+  }).then((res) => {
+    if (!res.ok) throw new Error('设备会话已失效，请重新配对')
+    location.replace(location.origin + '/')
+  }).catch(fail)
 }
 
 // ── mode tabs ────────────────────────────────────────────────────────────

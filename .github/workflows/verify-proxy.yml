@@ -4,9 +4,9 @@ on:
   workflow_dispatch: {}
   push:
     branches: [main]
-    paths: ['proxy/**', 'scripts/**', '.github/workflows/verify-proxy.yml']
+    paths: ['proxy/**', 'app/www/**', 'scripts/**', '.github/workflows/verify-proxy.yml']
   pull_request:
-    paths: ['proxy/**', 'scripts/**', '.github/workflows/verify-proxy.yml']
+    paths: ['proxy/**', 'app/www/**', 'scripts/**', '.github/workflows/verify-proxy.yml']
 
 jobs:
   smoke:
@@ -18,6 +18,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+
+      - name: Verify launcher behavior
+        run: node scripts/verify-launcher.mjs
 
       - name: Install the published dsh CLI
         run: npm install -g @deepseek-ai/dsh

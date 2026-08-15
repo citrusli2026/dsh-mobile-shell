@@ -9,20 +9,23 @@
  * request, HTTP and WebSocket alike.
  *
  * Token presentation (any one of):
- *   1. `GET <any-path>?token=<t>` — login: validates, sets an HttpOnly
- *      `dsh_token` cookie and 302-redirects to the same URL without the
- *      token query (mobile launcher uses this; browsers then send the
- *      cookie on every same-origin request, including WS handshakes).
+ *   1. `GET <any-path>?token=<t>` — legacy login: validates, down-scopes a
+ *      master credential, sets an HttpOnly `dsh_token` cookie and redirects
+ *      to the token-free URL. New launchers use POST /session instead.
  *   2. `Cookie: dsh_token=<t>` — session requests after login.
  *   3. `Authorization: Bearer <t>` — non-browser clients.
  *
- * Pairing (ADR-0006): phones exchange a short single-use code for the master
- * token instead of typing it.
+ * Pairing (ADR-0006, hardened by ADR-0008): clients exchange a short
+ * single-use code for a signed, 30-day device credential. The master token
+ * stays on the host. It mints pairing codes and remains a compatibility
+ * bootstrap credential; browser login always down-scopes it before storage.
  *   - `POST /pair/new` (master-token auth) mints a 6-digit code: single use,
  *     10-minute TTL, minting requires the bearer/cookie master token.
- *   - `POST /pair` (public, CORS `*` incl. OPTIONS preflight) trades a valid
- *     code for `{token}`; wrong/expired codes 403, per-source-IP attempts
- *     limited to 10/min (429 beyond).
+ *   - `POST /pair` (public, CORS `*` incl. OPTIONS preflight) sets an HttpOnly
+ *     device cookie for browsers. The bundled App compatibility path receives
+ *     the same scoped device credential, never the master token.
+ *   - `POST /session` turns a valid master/device bearer into an HttpOnly
+ *     device cookie; a master credential is always down-scoped first.
  *   - One initial code is printed at startup.
  *
  * `GET /healthz` answers 200 without auth (with `Access-Control-Allow-
@@ -43,8 +46,8 @@
  *
  * Web mode (ADR-0007): when the launcher page is available, unauthenticated
  * GET / (and /index.html) return the launcher instead of 401, and GET /launch
- * always returns it — any browser can then pair via POST /pair and log in
- * through ?token=. The gate is unchanged: /api, WebSocket upgrades and the
+ * always returns it — any browser can then pair via POST /pair and receive an
+ * HttpOnly session cookie. The gate is unchanged: /api, WebSocket upgrades and the
  * real UI assets still require the token; the launcher is a static page with
  * no secrets. Resolution: DSH_LAUNCHER=<path> (explicit; unreadable fails
  * loud) → app/www/index.html next to this file (missing → off with a boot
@@ -74,6 +77,8 @@ const TARGET_HOST = process.env.DSH_TARGET_HOST ?? '127.0.0.1'
 const TARGET_PORT = Number(process.env.DSH_TARGET_PORT ?? 3080)
 const TARGET_AUTHORITY = `${TARGET_HOST}:${TARGET_PORT}`
 const COOKIE_NAME = 'dsh_token'
+const DEVICE_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000
+const DEVICE_TOKEN_PREFIX = 'dshd1'
 
 // Optional TLS (ADR-0006): both PEM paths required, loaded at boot, fail loud.
 const TLS_CERT_PATH = process.env.DSH_TLS_CERT
@@ -113,6 +118,42 @@ function tokenOk(candidate) {
   const a = Buffer.from(candidate)
   const b = Buffer.from(TOKEN)
   return a.length === b.length && crypto.timingSafeEqual(a, b)
+}
+
+/**
+ * Device tokens are signed, time-limited bearer credentials. They have the
+ * same request access as the master token, but cannot mint pairing codes and
+ * rotating DSH_REMOTE_TOKEN invalidates every issued device token.
+ */
+function mintDeviceToken() {
+  const payload = Buffer.from(JSON.stringify({
+    id: crypto.randomUUID(),
+    exp: Date.now() + DEVICE_TOKEN_TTL_MS,
+  })).toString('base64url')
+  const signature = crypto.createHmac('sha256', TOKEN).update(payload).digest('base64url')
+  return `${DEVICE_TOKEN_PREFIX}.${payload}.${signature}`
+}
+
+function deviceTokenOk(candidate) {
+  if (typeof candidate !== 'string') return false
+  const [prefix, payload, signature, extra] = candidate.split('.')
+  if (prefix !== DEVICE_TOKEN_PREFIX || !payload || !signature || extra !== undefined) return false
+  const expected = crypto.createHmac('sha256', TOKEN).update(payload).digest()
+  const actual = Buffer.from(signature, 'base64url')
+  if (actual.length !== expected.length || !crypto.timingSafeEqual(actual, expected)) return false
+  try {
+    const claims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'))
+    return typeof claims.id === 'string'
+      && claims.id.length > 0
+      && Number.isSafeInteger(claims.exp)
+      && claims.exp > Date.now()
+  } catch {
+    return false
+  }
+}
+
+function accessTokenOk(candidate) {
+  return tokenOk(candidate) || deviceTokenOk(candidate)
 }
 
 // ── pairing codes (ADR-0006) ─────────────────────────────────────────────
@@ -164,11 +205,11 @@ function bearerToken(req) {
   return m?.[1]
 }
 
-function sessionCookie() {
+function sessionCookie(value) {
   // Secure only under TLS (ADR-0006): a Secure cookie on plain HTTP would
   // never be stored by the WebView.
   const secure = TLS ? '; Secure' : ''
-  return `${COOKIE_NAME}=${TOKEN}; HttpOnly; SameSite=Lax; Path=/${secure}`
+  return `${COOKIE_NAME}=${value}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${DEVICE_TOKEN_TTL_MS / 1000}${secure}`
 }
 
 function stripTokenParam(url) {
@@ -226,11 +267,19 @@ function forwardHttp(req, res, path) {
 const CORS_HEADERS = {
   'access-control-allow-origin': '*',
   'access-control-allow-methods': 'POST, OPTIONS',
-  'access-control-allow-headers': 'content-type',
+  'access-control-allow-headers': 'content-type, x-dsh-client',
+}
+
+const LAUNCHER_HEADERS = {
+  'content-type': 'text/html; charset=utf-8',
+  'cache-control': 'no-store',
+  'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+  'referrer-policy': 'no-referrer',
+  'x-content-type-options': 'nosniff',
 }
 
 function json(res, code, body, extraHeaders = {}) {
-  res.writeHead(code, { 'content-type': 'application/json', ...extraHeaders })
+  res.writeHead(code, { 'content-type': 'application/json', 'cache-control': 'no-store', ...extraHeaders })
   res.end(JSON.stringify(body))
 }
 
@@ -259,10 +308,60 @@ function readJsonBody(req) {
   })
 }
 
-const server = (TLS ? https.createServer(TLS, handle) : http.createServer(handle))
+function requestUrl(req, scheme = SCHEME) {
+  const host = req.headers.host
+  if (host) {
+    if (/[\s/@?#\\,]/.test(host)) return undefined
+    try {
+      // Validate Host, but never use it as the parsing base for the request
+      // target. A malformed Host must be a 400, not an uncaught exception.
+      new URL(`${scheme}://${host}`)
+    } catch {
+      return undefined
+    }
+  }
+  const target = req.url ?? '/'
+  if (!target.startsWith('/') || target.startsWith('//')) return undefined
+  try {
+    return new URL(target, `${scheme}://localhost`)
+  } catch {
+    return undefined
+  }
+}
+
+function requestOriginOk(req) {
+  const origin = req.headers.origin
+  if (!origin) return true
+  const host = req.headers.host
+  if (!host) return false
+  try {
+    // Compare the browser authority to Host using the Origin's HTTP(S)
+    // scheme. This remains same-host while allowing HTTPS to terminate at a
+    // trusted front proxy before the request reaches this plain-HTTP server.
+    const originUrl = new URL(origin)
+    if (originUrl.protocol !== 'http:' && originUrl.protocol !== 'https:') return false
+    return originUrl.origin === new URL(`${originUrl.protocol}//${host}`).origin
+  } catch {
+    return false
+  }
+}
+
+function handleRequest(req, res) {
+  handle(req, res).catch((error) => {
+    console.error(`dsh-remote: request failed: ${error.message}`)
+    if (!res.headersSent) reject(res, 500, '代理内部错误')
+    else res.destroy()
+  })
+}
+
+const server = (TLS ? https.createServer(TLS, handleRequest) : http.createServer(handleRequest))
 
 async function handle(req, res) {
-  const url = new URL(req.url ?? '/', `${SCHEME}://${req.headers.host ?? 'localhost'}`)
+  const url = requestUrl(req)
+  if (!url) {
+    reject(res, 400, '请求地址无效')
+    return
+  }
 
   if (url.pathname === '/healthz') {
     res.writeHead(200, {
@@ -281,7 +380,7 @@ async function handle(req, res) {
       reject(res, 404, '未启用 Web 模式')
       return
     }
-    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
+    res.writeHead(200, LAUNCHER_HEADERS)
     res.end(LAUNCHER_HTML)
     return
   }
@@ -304,10 +403,20 @@ async function handle(req, res) {
       json(res, 403, { error: 'invalid_or_expired_code' }, CORS_HEADERS)
       return
     }
-    json(res, 200, { token: TOKEN }, CORS_HEADERS)
+    const deviceToken = mintDeviceToken()
+    const headers = { ...CORS_HEADERS, 'set-cookie': sessionCookie(deviceToken) }
+    if (req.headers['x-dsh-client'] === 'app') {
+      json(res, 200, { token: deviceToken, expiresInSeconds: DEVICE_TOKEN_TTL_MS / 1000 }, headers)
+    } else {
+      json(res, 200, { ok: true, expiresInSeconds: DEVICE_TOKEN_TTL_MS / 1000 }, headers)
+    }
     return
   }
   if (url.pathname === '/pair/new' && req.method === 'POST') {
+    if (!requestOriginOk(req)) {
+      json(res, 403, { error: 'origin_forbidden' })
+      return
+    }
     if (!tokenOk(readCookie(req, COOKIE_NAME)) && !tokenOk(bearerToken(req))) {
       json(res, 401, { error: 'unauthorized' })
       return
@@ -317,33 +426,64 @@ async function handle(req, res) {
     return
   }
 
-  const queryToken = url.searchParams.get('token')
-  if (tokenOk(queryToken)) {
-    // Login: plant the session cookie and bounce to the token-free URL.
-    res.writeHead(302, { location: stripTokenParam(url), 'set-cookie': sessionCookie() })
+  if (url.pathname === '/session' && req.method === 'OPTIONS') {
+    res.writeHead(204, CORS_HEADERS)
     res.end()
     return
   }
-  if (!tokenOk(readCookie(req, COOKIE_NAME)) && !tokenOk(bearerToken(req))) {
+  if (url.pathname === '/session' && req.method === 'POST') {
+    if (!requestOriginOk(req)) {
+      json(res, 403, { error: 'origin_forbidden' }, CORS_HEADERS)
+      return
+    }
+    const body = await readJsonBody(req)
+    const credential = typeof body?.token === 'string' ? body.token : ''
+    if (!accessTokenOk(credential)) {
+      json(res, 401, { error: 'unauthorized' }, CORS_HEADERS)
+      return
+    }
+    const sessionToken = tokenOk(credential) ? mintDeviceToken() : credential
+    json(res, 200, { ok: true }, { ...CORS_HEADERS, 'set-cookie': sessionCookie(sessionToken) })
+    return
+  }
+
+  const queryToken = url.searchParams.get('token')
+  if (accessTokenOk(queryToken)) {
+    // Login: plant the session cookie and bounce to the token-free URL.
+    const sessionToken = tokenOk(queryToken) ? mintDeviceToken() : queryToken
+    res.writeHead(302, { location: stripTokenParam(url), 'set-cookie': sessionCookie(sessionToken) })
+    res.end()
+    return
+  }
+  if (!accessTokenOk(readCookie(req, COOKIE_NAME)) && !accessTokenOk(bearerToken(req))) {
     // Web mode (ADR-0007): the launcher is the unauthenticated face of /.
     // Only the bare index paths — /api, WS and UI assets stay gated.
     if (LAUNCHER_HTML && req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
-      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
+      res.writeHead(200, LAUNCHER_HEADERS)
       res.end(LAUNCHER_HTML)
       return
     }
     reject(res, 401, '未授权')
     return
   }
+  if (!requestOriginOk(req)) {
+    reject(res, 403, '来源不允许')
+    return
+  }
   forwardHttp(req, res, stripTokenParam(url))
 }
 
 server.on('upgrade', (req, socket, head) => {
-  const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`)
-  const ok = tokenOk(url.searchParams.get('token'))
-    || tokenOk(readCookie(req, COOKIE_NAME))
-    || tokenOk(bearerToken(req))
-  if (!ok) {
+  const url = requestUrl(req, TLS ? 'https' : 'http')
+  if (!url) {
+    socket.write('HTTP/1.1 400 Bad Request\r\n\r\n')
+    socket.destroy()
+    return
+  }
+  const ok = accessTokenOk(url.searchParams.get('token'))
+    || accessTokenOk(readCookie(req, COOKIE_NAME))
+    || accessTokenOk(bearerToken(req))
+  if (!ok || !requestOriginOk(req)) {
     socket.write('HTTP/1.1 403 Forbidden\r\n\r\n')
     socket.destroy()
     return
@@ -378,6 +518,10 @@ server.on('upgrade', (req, socket, head) => {
     socket.destroy()
   })
   upstream.end()
+})
+
+server.on('clientError', (_error, socket) => {
+  if (socket.writable) socket.end('HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n')
 })
 
 // SSE streams and WS tunnels are long-lived; Node's default request/headers

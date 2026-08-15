@@ -81,6 +81,32 @@ function wsHandshakeStatus(url, headers) {
   })
 }
 
+/** Send a raw HTTP request so malformed Host handling can be regression-tested. */
+function rawHttpStatus(url, request) {
+  return new Promise((resolve, reject) => {
+    const target = new URL(url)
+    const onConnect = (socket) => {
+      socket.write(request)
+      let data = ''
+      socket.on('data', (chunk) => {
+        data += chunk
+        const match = /^HTTP\/1\.1 (\d+)/.exec(data)
+        if (match) {
+          socket.destroy()
+          resolve(Number(match[1]))
+        }
+      })
+      socket.on('error', reject)
+      socket.setTimeout(8000, () => {
+        socket.destroy()
+        reject(new Error('raw HTTP timeout'))
+      })
+    }
+    if (SECURE) onConnect(tls.connect(Number(target.port), target.hostname, { rejectUnauthorized: false }))
+    else onConnect(net.connect(Number(target.port), target.hostname))
+  })
+}
+
 await check('upstream dsh web is reachable', async () => {
   const res = await fetch(`${UPSTREAM}/`)
   expect(res.ok, `HTTP ${res.status} from ${UPSTREAM}/ — is \`dsh web\` running?`)
@@ -96,6 +122,20 @@ await check('GET / without token → launcher page (web mode, ADR-0007)', async 
   const res = await fetch(`${PROXY}/`, { redirect: 'manual' })
   expect(res.status === 200, `HTTP ${res.status}`)
   expect((await res.text()).includes('dsh-remote launcher'), 'launcher marker missing')
+  expect(res.headers.get('content-security-policy')?.includes("default-src 'none'"), 'launcher CSP missing')
+  expect(res.headers.get('content-security-policy')?.includes("connect-src 'self'"), 'launcher connect-src is not same-origin')
+  expect(res.headers.get('referrer-policy') === 'no-referrer', 'launcher referrer policy missing')
+})
+
+await check('malformed Host → 400 and proxy remains alive', async () => {
+  const malformedHost = await rawHttpStatus(PROXY, 'GET / HTTP/1.1\r\nHost: [\r\nConnection: close\r\n\r\n')
+  expect(malformedHost === 400, `malformed Host HTTP ${malformedHost}`)
+  const userInfoHost = await rawHttpStatus(PROXY, 'GET / HTTP/1.1\r\nHost: user@127.0.0.1\r\nConnection: close\r\n\r\n')
+  expect(userInfoHost === 400, `userinfo Host HTTP ${userInfoHost}`)
+  const absoluteTarget = await rawHttpStatus(PROXY, `GET http://attacker.invalid/ HTTP/1.1\r\nHost: ${new URL(PROXY).host}\r\nConnection: close\r\n\r\n`)
+  expect(absoluteTarget === 400, `absolute request target HTTP ${absoluteTarget}`)
+  const health = await fetch(`${PROXY}/healthz`)
+  expect(health.status === 200, `proxy died after malformed Host: HTTP ${health.status}`)
 })
 
 await check('GET / with a wrong token → launcher page (not the UI)', async () => {
@@ -110,14 +150,16 @@ await check('GET /launch without token → launcher page', async () => {
   expect((await res.text()).includes('dsh-remote launcher'), 'launcher marker missing')
 })
 
-await check('login with the right token → 302 + HttpOnly cookie', async () => {
+const session = { cookie: '' }
+await check('login with the right token → 302 + down-scoped HttpOnly cookie', async () => {
   const res = await fetch(`${PROXY}/?token=${encodeURIComponent(TOKEN)}`, { redirect: 'manual' })
   expect(res.status === 302, `HTTP ${res.status}`)
   const cookie = res.headers.get('set-cookie') ?? ''
   expect(cookie.includes('dsh_token=') && cookie.includes('HttpOnly'), `set-cookie: ${cookie}`)
+  expect(!cookie.includes(`dsh_token=${TOKEN};`), 'master token was persisted in the browser cookie')
+  session.cookie = cookie.split(';', 1)[0]
+  expect(session.cookie.startsWith('dsh_token=dshd1.'), `unexpected session cookie: ${session.cookie}`)
 })
-
-const session = { cookie: `dsh_token=${TOKEN}` }
 
 await check('GET / with session cookie → the real dsh web UI', async () => {
   const res = await fetch(`${PROXY}/`, { headers: session })
@@ -141,6 +183,26 @@ await check('authenticated /api POST passes the upstream fence (not 401/403)', a
     body: '{"type":"client-request","rpcId":"1","method":"ping","payload":{}}',
   })
   expect(res.status !== 401 && res.status !== 403, `HTTP ${res.status} — trust fence rejected`)
+  if (!SECURE) {
+    const frontedOrigin = new URL(PROXY)
+    frontedOrigin.protocol = 'https:'
+    const behindTlsTerminator = await fetch(`${PROXY}/api/rpc/connection/ping`, {
+      method: 'POST',
+      headers: { ...session, 'content-type': 'application/json', origin: frontedOrigin.origin },
+      body: '{"type":"client-request","rpcId":"2","method":"ping","payload":{}}',
+    })
+    expect(behindTlsTerminator.status !== 401 && behindTlsTerminator.status !== 403,
+      `HTTP ${behindTlsTerminator.status} — TLS-terminating front proxy was rejected`)
+  }
+})
+
+await check('authenticated cross-origin API request → 403', async () => {
+  const res = await fetch(`${PROXY}/api/rpc/connection/ping`, {
+    method: 'POST',
+    headers: { ...session, 'content-type': 'application/json', origin: 'https://attacker.invalid' },
+    body: '{}',
+  })
+  expect(res.status === 403, `HTTP ${res.status}`)
 })
 
 await check('WS handshake without token → 403', async () => {
@@ -151,6 +213,21 @@ await check('WS handshake without token → 403', async () => {
 await check('WS handshake with cookie → 101', async () => {
   const status = await wsHandshakeStatus(`${PROXY}/api/events.mux`, session)
   expect(status === 101, `HTTP ${status}`)
+})
+
+await check('cross-origin WS handshake with cookie → 403', async () => {
+  const status = await wsHandshakeStatus(`${PROXY}/api/events.mux`, {
+    ...session,
+    origin: 'https://attacker.invalid',
+  })
+  expect(status === 403, `HTTP ${status}`)
+})
+
+await check('malformed Host WS handshake → 400 and proxy remains alive', async () => {
+  const status = await wsHandshakeStatus(`${PROXY}/api/events.mux`, { host: '[' })
+  expect(status === 400, `HTTP ${status}`)
+  const health = await fetch(`${PROXY}/healthz`)
+  expect(health.status === 200, `proxy died after malformed WS Host: HTTP ${health.status}`)
 })
 
 // ── pairing (ADR-0006) ───────────────────────────────────────────────────
@@ -188,7 +265,8 @@ await check('POST /pair with a wrong code → 403', async () => {
   expect(res.status === 403, `HTTP ${res.status}`)
 })
 
-await check('POST /pair with the minted code → the master token', async () => {
+let deviceToken = ''
+await check('web pairing → HttpOnly device cookie; master token is not returned', async () => {
   const res = await fetch(`${PROXY}/pair`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -196,7 +274,64 @@ await check('POST /pair with the minted code → the master token', async () => 
   })
   expect(res.status === 200, `HTTP ${res.status}`)
   const body = await res.json()
-  expect(body.token === TOKEN, 'returned token mismatch')
+  expect(body.ok === true && body.token === undefined, `unexpected body: ${JSON.stringify(body)}`)
+  const cookie = res.headers.get('set-cookie') ?? ''
+  const match = /(?:^|;\s*)dsh_token=([^;]+)/.exec(cookie)
+  expect(match, `device cookie missing: ${cookie}`)
+  deviceToken = match[1]
+  expect(deviceToken !== TOKEN, 'master token leaked into device cookie')
+  expect(deviceToken.startsWith('dshd1.'), `unexpected device token shape: ${deviceToken}`)
+  expect(cookie.includes('HttpOnly'), `cookie is not HttpOnly: ${cookie}`)
+})
+
+await check('device cookie can access UI but cannot mint pairing codes', async () => {
+  const deviceSession = { cookie: `dsh_token=${deviceToken}` }
+  const ui = await fetch(`${PROXY}/`, { headers: deviceSession })
+  expect(ui.status === 200, `UI HTTP ${ui.status}`)
+  expect((await ui.text()).includes('DeepSeek Harness'), 'device cookie did not reach real UI')
+  const mint = await fetch(`${PROXY}/pair/new`, { method: 'POST', headers: deviceSession })
+  expect(mint.status === 401, `device token minted a pairing code: HTTP ${mint.status}`)
+})
+
+await check('tampered device token → 401', async () => {
+  const tampered = deviceToken.slice(0, -1) + (deviceToken.endsWith('A') ? 'B' : 'A')
+  const res = await fetch(`${PROXY}/api/rpc/connection/ping`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${tampered}`, 'content-type': 'application/json' },
+    body: '{}',
+  })
+  expect(res.status === 401, `HTTP ${res.status}`)
+})
+
+await check('POST /session accepts a device token and returns only a cookie', async () => {
+  const res = await fetch(`${PROXY}/session`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ token: deviceToken }),
+  })
+  expect(res.status === 200, `HTTP ${res.status}`)
+  const body = await res.json()
+  expect(body.ok === true && body.token === undefined, `unexpected body: ${JSON.stringify(body)}`)
+  expect((res.headers.get('set-cookie') ?? '').includes('HttpOnly'), 'session cookie missing')
+})
+
+await check('POST /session down-scopes a master token and rejects cross-origin use', async () => {
+  const res = await fetch(`${PROXY}/session`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ token: TOKEN }),
+  })
+  expect(res.status === 200, `HTTP ${res.status}`)
+  const cookie = res.headers.get('set-cookie') ?? ''
+  expect(cookie.includes('dsh_token=dshd1.'), `master was not down-scoped: ${cookie}`)
+  expect(!cookie.includes(`dsh_token=${TOKEN};`), 'master token was persisted')
+
+  const crossOrigin = await fetch(`${PROXY}/session`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', origin: 'https://attacker.invalid' },
+    body: JSON.stringify({ token: TOKEN }),
+  })
+  expect(crossOrigin.status === 403, `cross-origin HTTP ${crossOrigin.status}`)
 })
 
 await check('redeemed code is single-use (replay → 403)', async () => {
@@ -206,6 +341,25 @@ await check('redeemed code is single-use (replay → 403)', async () => {
     body: JSON.stringify({ code: mintedCode }),
   })
   expect(res.status === 403, `HTTP ${res.status}`)
+})
+
+let appCode = ''
+await check('app compatibility pairing returns a scoped device token, never the master', async () => {
+  const mint = await fetch(`${PROXY}/pair/new`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${TOKEN}` },
+  })
+  expect(mint.status === 200, `mint HTTP ${mint.status}`)
+  appCode = (await mint.json()).code
+  const res = await fetch(`${PROXY}/pair`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-dsh-client': 'app' },
+    body: JSON.stringify({ code: appCode }),
+  })
+  expect(res.status === 200, `pair HTTP ${res.status}`)
+  const body = await res.json()
+  expect(typeof body.token === 'string' && body.token.startsWith('dshd1.'), 'device token missing')
+  expect(body.token !== TOKEN, 'master token returned to app')
 })
 
 await check('pairing attempts are rate-limited (burst → 429)', async () => {

@@ -1,6 +1,6 @@
 # 06 阶段 2：配对码 + 可选 TLS — 实施与验证记录
 
-状态：**已完成（2026-08-14）**。决策见 [ADR-0006](decisions/ADR-0006-pairing-code-and-tls.md)。
+状态：**已完成（2026-08-14）**。决策见 [ADR-0006](decisions/ADR-0006-pairing-code-and-tls.md)。本文记录当时实现；其中“配对码直接返回主令牌”的安全模型已被 [ADR-0008](decisions/ADR-0008-device-session-and-web-hardening.md) 取代，当前实现见 [09](09-web-security-hardening.md)。
 
 ## 1. 交付内容
 

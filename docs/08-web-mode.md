@@ -1,6 +1,6 @@
 # 08 Web 模式：浏览器零安装直连 — 实施与验证记录
 
-状态：**已完成（2026-08-15）**。决策见 [ADR-0007](decisions/ADR-0007-web-mode-launcher.md)。
+状态：**已完成（2026-08-15）**。决策见 [ADR-0007](decisions/ADR-0007-web-mode-launcher.md)。本文记录 Web 模式首次落地；当前设备会话与安全加固见 [ADR-0008](decisions/ADR-0008-device-session-and-web-hardening.md) 和 [09](09-web-security-hardening.md)。
 
 ## 1. 目标与形态
 
