@@ -15,7 +15,7 @@ A community, open-source **mobile shell** for [DeepSeek Harness](https://github.
 | [`scripts/`](scripts/) | Verification tooling (launcher regression, real-dsh HTTP/HTTPS/WSS proxy matrix, and CDP-driven Android E2E) |
 | [`docs/`](docs/) | Analysis, feasibility study, PoC runbook, and every design decision as ADRs |
 
-Companion plugin: [`dsh-mobile-ui`](https://github.com/citrusli2026/dsh-mobile-ui) — mobile navigation chrome (bottom bar, session drawer) as an out-of-tree client plugin for the host's web UI. The shell works without it; the plugin works without the shell.
+The `dsh-mobile-ui` companion previously supplied mobile navigation chrome (bottom bar and session drawer) as an out-of-tree client plugin, but its former public repository is currently unavailable. Its in-repo recovery is now in the [deferred mobile backlog](docs/10-roadmap-to-release.md#8-androidios-后移-backlog). Do not follow old installation links until a version is pinned; the base shell and Web mode do not depend on it.
 
 ## Quick start
 
@@ -26,16 +26,18 @@ npx @deepseek-ai/dsh web --port 3080          # the harness, loopback as usual
 DSH_REMOTE_TOKEN=$(openssl rand -hex 16) node proxy/dsh-remote.mjs
 # dsh-remote: http://0.0.0.0:3081 -> http://127.0.0.1:3080 (token required)
 # dsh-remote: pairing code 847291 — single use, expires in 10 min
+# dsh-remote: pairing link http://192.168.1.10:3081/launch#pair=847291
+# An interactive terminal also shows a QR; enter n + Return to mint a new one.
 ```
 
 **2. On your phone** (same Wi-Fi) — two ways in:
 
-- **Web mode (zero install, ADR-0007)**: open `http://<computer-LAN-IP>:3081/` in any browser — the proxy itself serves the launcher. Type the printed **pairing code** and you're in. The master token never leaves your computer.
+- **Web mode (zero install, ADR-0007)**: scan the terminal QR. The browser opens the launcher, removes the scan fragment, and prefills the short code; confirm once to enter. You can still open `http://<computer-LAN-IP>:3081/` and type the printed six-digit code. The master token never leaves your computer.
 - **App**: install the shell, enter `http://<computer-LAN-IP>:3081` and the pairing code (token entry remains as an advanced option). A remembered host gives one-tap reconnect.
-  - **Android**: download the APK from [Releases](../../releases) and install directly.
+  - **Android**: download the APK from [Releases](https://github.com/citrusli2026/dsh-mobile-shell/releases) and install directly.
   - **iOS**: build from source (below) or join TestFlight when available — Apple has no direct-install path for unsigned builds.
 
-> **Web verification status (2026-08-15): passed.** The published `dsh web` completed the HTTP 27/27 and HTTPS/WSS 27/27 automated matrices. A real Chromium run also passed the full flow: open launcher → enter a real pairing code → land in DeepSeek Harness → reload with the session intact. See the [Web hardening and verification report](docs/09-web-security-hardening.md). This result does not claim that the mobile app has completed its next verification stage.
+> **Web verification status (2026-08-15): passed.** The published `dsh web` completed the HTTP 28/28 and HTTPS/WSS 28/28 automated matrices. Playwright Chromium/WebKit plus mobile Chromium/WebKit passed the full flow: open QR deep link → explicit confirmation → land in DeepSeek Harness → reload with the session intact. The installed Google Chrome channel also passed 2/2. See the [Web hardening and verification report](docs/09-web-security-hardening.md). This result does not claim that physical Safari or the mobile app has completed its next verification stage.
 
 ## Build from source
 
@@ -69,12 +71,15 @@ Slow downloads? China-mirror configurations for npm / Gradle / Maven / Node head
 | 1 | PoC: shell + token proxy, LAN verification on both emulators | ✅ done ([report](docs/05-phase1-poc.md)) |
 | 2 | Pairing codes, optional TLS at the proxy | ✅ done ([report](docs/06-phase2-pairing-tls.md)) |
 | Web | Zero-install browser flow, device sessions, and security hardening | ✅ done and E2E verified ([report](docs/09-web-security-hardening.md)) |
-| 3 | Mobile UI polish (via `dsh-mobile-ui`), offline bundled assets, TestFlight / stores | in progress — [real-device checklist](docs/07-real-device-verification.md) |
+| 3 | Web QR pairing, full device lifecycle, management/deployment UX, and i18n | Web-first, in progress — [roadmap](docs/10-roadmap-to-release.md) |
+| 4 | Android/iOS builds, signing, mobile UI, and physical-device release gates | deferred — [device checklist](docs/07-real-device-verification.md) |
+| 5 | Push, a full offline shell, and other high-cost experience work | evaluate after Web is stable |
 
 ## Documentation
 
 - [docs/README.md](docs/README.md) — full index: project analysis, build/dependency guide, feasibility study, PoC runbook
-- [docs/decisions/](docs/decisions/) — ADR-0001…0008, one per consequential choice
+- [Web QR pairing report](docs/11-web-qr-pairing.md) — offline QR, deep-link behavior, and verification
+- [docs/decisions/](docs/decisions/) — ADR-0001…0009, one per consequential choice
 
 ## License
 

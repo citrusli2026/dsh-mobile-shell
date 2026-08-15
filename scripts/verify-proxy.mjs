@@ -164,7 +164,10 @@ await check('login with the right token → 302 + down-scoped HttpOnly cookie', 
 await check('GET / with session cookie → the real dsh web UI', async () => {
   const res = await fetch(`${PROXY}/`, { headers: session })
   expect(res.status === 200, `HTTP ${res.status}`)
-  expect((await res.text()).includes('DeepSeek Harness'), 'title marker missing')
+  const html = await res.text()
+  expect(html.includes('DeepSeek Harness'), 'title marker missing')
+  expect(html.includes('data-dsh-remote-random-uuid-polyfill'), 'LAN crypto.randomUUID compatibility shim missing')
+  expect(html.includes('getRandomValues'), 'UUID shim does not use Web Crypto randomness')
 })
 
 await check('POST /api without cookie → 401', async () => {
@@ -246,6 +249,12 @@ await check('POST /pair/new with master token → 6-digit code', async () => {
   expect(res.status === 200, `HTTP ${res.status}`)
   const body = await res.json()
   expect(/^\d{6}$/.test(body.code ?? ''), `code shape: ${JSON.stringify(body)}`)
+  expect(Array.isArray(body.pairingUrls) && body.pairingUrls.length > 0,
+    `pairing URLs missing: ${JSON.stringify(body)}`)
+  const pairingUrl = new URL(body.pairingUrls[0])
+  expect(pairingUrl.pathname === '/launch', `pairing path: ${pairingUrl.pathname}`)
+  expect(pairingUrl.hash === `#pair=${body.code}`, `pairing fragment: ${pairingUrl.hash}`)
+  expect(!body.pairingUrls[0].includes('token'), 'pairing URL leaked a token')
   mintedCode = body.code
 })
 
@@ -253,6 +262,17 @@ await check('OPTIONS /pair → 204 with CORS allow headers', async () => {
   const res = await fetch(`${PROXY}/pair`, { method: 'OPTIONS' })
   expect(res.status === 204, `HTTP ${res.status}`)
   expect(res.headers.get('access-control-allow-origin') === '*', 'missing ACAO:*')
+})
+
+await check('oversized JSON body → 413 and proxy remains alive', async () => {
+  const res = await fetch(`${PROXY}/pair`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ code: 'x'.repeat(70 * 1024) }),
+  })
+  expect(res.status === 413, `HTTP ${res.status}`)
+  const health = await fetch(`${PROXY}/healthz`)
+  expect(health.status === 200, `proxy died after oversized body: HTTP ${health.status}`)
 })
 
 await check('POST /pair with a wrong code → 403', async () => {
@@ -294,7 +314,9 @@ await check('device cookie can access UI but cannot mint pairing codes', async (
 })
 
 await check('tampered device token → 401', async () => {
-  const tampered = deviceToken.slice(0, -1) + (deviceToken.endsWith('A') ? 'B' : 'A')
+  const [prefix, payload, signature] = deviceToken.split('.')
+  const tamperedSignature = (signature[0] === 'A' ? 'B' : 'A') + signature.slice(1)
+  const tampered = `${prefix}.${payload}.${tamperedSignature}`
   const res = await fetch(`${PROXY}/api/rpc/connection/ping`, {
     method: 'POST',
     headers: { authorization: `Bearer ${tampered}`, 'content-type': 'application/json' },

@@ -39,6 +39,6 @@ DSH_REMOTE_TOKEN=$(openssl rand -hex 16) node proxy/dsh-remote.mjs
 ## 5. 发现与限制
 
 - **`adb install -r` 重装会清掉 WebView localStorage**：重装后"已保存的主机"消失，需重新配对。App 正常使用（杀进程/重启）不受影响；覆盖安装视为重置连接，记录为已知行为。
-- **模拟器 Chrome 未纳入 E2E**：API35 模拟器镜像的 Chrome 不开放 CDP（无 `chrome_devtools_remote`，`chrome-command-line` 机制被忽略）。Web 模式的浏览器 E2E 改由桌面 Chromium + 移动视口完成，网络路径与真机一致（局域网 IP）；移动浏览器渲染差异留真机清单。
-- iOS Safari 的 Web 模式未测——属真机清单 E 系列范畴（Safari 对 HttpOnly Cookie + WS 的处理与 WKWebView 一致，预期无碍，真机确认）。
+- **模拟器 Chrome 未纳入 CDP E2E**：API35 模拟器镜像的 Chrome 不开放 CDP（无 `chrome_devtools_remote`，`chrome-command-line` 机制被忽略）。当前 Web E2E 由桌面/移动 Chromium 与 WebKit 覆盖，网络路径与真机一致；实体移动浏览器渲染差异仍留真机清单。
+- 实体 iOS Safari 的 Web 模式仍未测——本轮已用 Playwright WebKit 覆盖 Safari 引擎级行为，但真机 Safari 的后台、网络和系统 WebView 差异仍需 E 系列确认。
 - 扫码配对链接（阶段 3 项）在 Web 模式下天然成立：链接即代理地址，届时一并验证。

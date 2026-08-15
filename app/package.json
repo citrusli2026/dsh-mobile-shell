@@ -9,9 +9,8 @@
     "open:android": "cap open android",
     "open:ios": "cap open ios",
     "build:android": "cd android && ./gradlew assembleDebug",
-    "build:ios": "xcodebuild -workspace ios/App/App.xcworkspace -scheme App -configuration Debug -destination 'generic/platform=iOS Simulator' -derivedDataPath ios/build SYMROOT=build",
-    "verify:android": "node scripts/verify-android.mjs",
-    "verify:ios": "node scripts/verify-ios.mjs"
+    "build:ios": "xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath ios/build CODE_SIGNING_ALLOWED=NO build",
+    "typecheck": "tsc --noEmit capacitor.config.ts --module nodenext --moduleResolution nodenext --target es2022 --skipLibCheck"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.0",
@@ -21,5 +20,10 @@
   "devDependencies": {
     "@capacitor/cli": "^8.5.0",
     "typescript": "7.0.2"
+  },
+  "overrides": {
+    "xcode": {
+      "uuid": "11.1.1"
+    }
   }
 }

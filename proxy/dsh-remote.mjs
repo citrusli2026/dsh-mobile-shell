@@ -26,7 +26,9 @@
  *     the same scoped device credential, never the master token.
  *   - `POST /session` turns a valid master/device bearer into an HttpOnly
  *     device cookie; a master credential is always down-scoped first.
- *   - One initial code is printed at startup.
+ *   - One initial code, copyable pairing URL and (in an interactive terminal)
+ *     local QR code are printed at startup. The QR fragment carries only the
+ *     short-lived single-use code, never a master/device credential.
  *
  * `GET /healthz` answers 200 without auth (with `Access-Control-Allow-
  * Origin: *`) so the app launcher can precheck reachability from its own
@@ -52,6 +54,11 @@
  * no secrets. Resolution: DSH_LAUNCHER=<path> (explicit; unreadable fails
  * loud) → app/www/index.html next to this file (missing → off with a boot
  * note) → DSH_LAUNCHER=off forces the plain 401 face.
+ * LAN HTTP compatibility: the upstream UI calls the Web Crypto
+ * `crypto.randomUUID()` API, which browsers expose only in secure contexts.
+ * The proxy serves the UI over plain HTTP for trusted LAN deployments, so the
+ * authenticated HTML document gets a small `getRandomValues()`-based fallback
+ * before the upstream modules load. Native implementations are never replaced.
  *
  * Env:
  *   DSH_REMOTE_TOKEN (required)  shared secret; compared in constant time
@@ -59,12 +66,15 @@
  *   DSH_TARGET_HOST   default 127.0.0.1    DSH_TARGET_PORT  default 3080
  *   DSH_TLS_CERT / DSH_TLS_KEY  (optional, both required)  PEM file paths
  *   DSH_LAUNCHER      (optional) launcher HTML path, or "off"
+ *   DSH_PUBLIC_URL    (optional) public proxy origin used in pairing links
+ *   DSH_PAIR_QR       default on in a TTY; set "off" to hide terminal QR
  */
 import http from 'node:http'
 import https from 'node:https'
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import { discoverPublicBases, pairingUrls, renderTerminalQr } from './pairing-qr.mjs'
 
 const TOKEN = process.env.DSH_REMOTE_TOKEN
 if (!TOKEN || TOKEN.length < 8) {
@@ -91,6 +101,44 @@ const TLS = TLS_CERT_PATH !== undefined
   ? { cert: fs.readFileSync(TLS_CERT_PATH), key: fs.readFileSync(TLS_KEY_PATH) }
   : undefined
 const SCHEME = TLS ? 'https' : 'http'
+let PAIRING_BASES
+try {
+  PAIRING_BASES = discoverPublicBases({
+    scheme: SCHEME,
+    listenHost: LISTEN_HOST,
+    listenPort: LISTEN_PORT,
+    publicUrl: process.env.DSH_PUBLIC_URL,
+  })
+} catch (error) {
+  console.error(`dsh-remote: invalid pairing URL configuration: ${error.message}`)
+  process.exit(1)
+}
+
+// Chromium/Safari expose crypto.getRandomValues() on LAN HTTP pages, but keep
+// crypto.randomUUID() behind the secure-context boundary. dsh uses the latter
+// for client-side request IDs, so the fallback must run before its module graph.
+const RANDOM_UUID_POLYFILL_MARKER = 'data-dsh-remote-random-uuid-polyfill'
+const RANDOM_UUID_POLYFILL = `<script ${RANDOM_UUID_POLYFILL_MARKER}>
+(() => {
+  const cryptoApi = globalThis.crypto
+  if (!cryptoApi || typeof cryptoApi.randomUUID === 'function'
+      || typeof cryptoApi.getRandomValues !== 'function') return
+  const randomUUID = () => {
+    const bytes = new Uint8Array(16)
+    cryptoApi.getRandomValues(bytes)
+    bytes[6] = (bytes[6] & 0x0f) | 0x40
+    bytes[8] = (bytes[8] & 0x3f) | 0x80
+    const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
+    return hex.slice(0, 8) + '-' + hex.slice(8, 12) + '-' + hex.slice(12, 16)
+      + '-' + hex.slice(16, 20) + '-' + hex.slice(20)
+  }
+  Object.defineProperty(cryptoApi, 'randomUUID', {
+    configurable: true,
+    writable: true,
+    value: randomUUID,
+  })
+})()
+</script>`
 
 // Web mode (ADR-0007): serve the launcher page to unauthenticated browsers so
 // any phone/desktop browser can pair without installing the app. Resolution:
@@ -138,9 +186,14 @@ function deviceTokenOk(candidate) {
   if (typeof candidate !== 'string') return false
   const [prefix, payload, signature, extra] = candidate.split('.')
   if (prefix !== DEVICE_TOKEN_PREFIX || !payload || !signature || extra !== undefined) return false
-  const expected = crypto.createHmac('sha256', TOKEN).update(payload).digest()
-  const actual = Buffer.from(signature, 'base64url')
-  if (actual.length !== expected.length || !crypto.timingSafeEqual(actual, expected)) return false
+  const expected = crypto.createHmac('sha256', TOKEN).update(payload).digest('base64url')
+  // Buffer.from(..., 'base64url') accepts non-canonical trailing pad bits. A
+  // byte-wise comparison alone would therefore accept alternate spellings of
+  // the same signature, so require the canonical encoding before comparing.
+  const expectedBytes = Buffer.from(expected)
+  const actualBytes = Buffer.from(signature)
+  if (actualBytes.length !== expectedBytes.length
+      || !crypto.timingSafeEqual(actualBytes, expectedBytes)) return false
   try {
     const claims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'))
     return typeof claims.id === 'string'
@@ -169,6 +222,45 @@ function mintPairCode() {
   const code = String(crypto.randomInt(0, 1_000_000)).padStart(6, '0')
   pairCodes.set(code, Date.now() + PAIR_CODE_TTL_MS)
   return code
+}
+
+function pairingInfo(code) {
+  return {
+    code,
+    expiresInSeconds: PAIR_CODE_TTL_MS / 1000,
+    pairingUrls: LAUNCHER_HTML ? pairingUrls(PAIRING_BASES, code) : [],
+  }
+}
+
+function announcePairingCode(code) {
+  const info = pairingInfo(code)
+  console.log(`dsh-remote: pairing code ${code} — single use, expires in 10 min`)
+  for (const url of info.pairingUrls) console.log(`dsh-remote: pairing link ${url}`)
+  const showQr = process.stdout.isTTY
+    && process.env.DSH_PAIR_QR !== 'off'
+    && process.env.NO_COLOR === undefined
+    && info.pairingUrls.length > 0
+  if (showQr) {
+    console.log('dsh-remote: scan to prefill the pairing code, then confirm once:')
+    console.log(renderTerminalQr(info.pairingUrls[0]))
+  }
+  return info
+}
+
+function enableTerminalPairing() {
+  if (!process.stdin.isTTY) return
+  process.stdin.setEncoding('utf8')
+  let pending = ''
+  process.stdin.on('data', (chunk) => {
+    pending += chunk
+    let newline
+    while ((newline = pending.indexOf('\n')) >= 0) {
+      const command = pending.slice(0, newline).trim().toLowerCase()
+      pending = pending.slice(newline + 1)
+      if (command === 'n' || command === 'new') announcePairingCode(mintPairCode())
+      else if (command) console.log('dsh-remote: unknown terminal command; enter n for a new pairing QR')
+    }
+  })
 }
 
 /** Redeem a code; single-use and expiry enforced. @returns {boolean} */
@@ -218,18 +310,32 @@ function stripTokenParam(url) {
 }
 
 function reject(res, code, message) {
+  const escapedMessage = String(message).replace(/[&<>"']/g, (char) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+  })[char])
   res.writeHead(code, { 'content-type': 'text/html; charset=utf-8' })
-  res.end(`<!doctype html><meta charset="utf-8"><title>${code}</title><body style="font-family:sans-serif;background:#0d1117;color:#e6edf3;display:grid;place-items:center;min-height:100vh"><div><h1>${code} ${message}</h1><p>请通过启动页携带令牌重新连接。</p></div>`)
+  res.end(`<!doctype html><meta charset="utf-8"><title>${code}</title><body style="font-family:sans-serif;background:#0d1117;color:#e6edf3;display:grid;place-items:center;min-height:100vh"><div><h1>${code} ${escapedMessage}</h1><p>请通过启动页携带令牌重新连接。</p></div>`)
 }
 
 /** Headers safe to forward upstream: loopback Host, no Origin (see file header). */
-function upstreamHeaders(req) {
+function upstreamHeaders(req, { htmlDocument = false } = {}) {
   const headers = { ...req.headers }
   headers.host = TARGET_AUTHORITY
   delete headers.origin
   delete headers.connection
   delete headers['keep-alive']
   delete headers['transfer-encoding']
+  if (htmlDocument) {
+    // The HTML must be buffered and rewritten. Avoid compressed/conditional
+    // responses, which otherwise cannot be safely patched in this proxy.
+    headers['accept-encoding'] = 'identity'
+    delete headers['if-none-match']
+    delete headers['if-modified-since']
+  }
   return headers
 }
 
@@ -245,15 +351,58 @@ function upgradeHeaders(req) {
   return headers
 }
 
+function frontendDocumentPath(path) {
+  try {
+    const pathname = new URL(path, 'http://dsh.internal').pathname
+    return pathname === '/' || pathname === '/index.html'
+  } catch {
+    return false
+  }
+}
+
+function injectRandomUuidPolyfill(body) {
+  const source = body.toString('utf8')
+  if (source.includes(RANDOM_UUID_POLYFILL_MARKER)) return { body, changed: false }
+  const head = /<head\b[^>]*>/i.exec(source)
+  if (!head) return { body, changed: false }
+  const patched = source.slice(0, head.index + head[0].length)
+    + RANDOM_UUID_POLYFILL
+    + source.slice(head.index + head[0].length)
+  return { body: Buffer.from(patched, 'utf8'), changed: true }
+}
+
 function forwardHttp(req, res, path) {
+  const htmlDocument = req.method !== 'HEAD' && frontendDocumentPath(path)
   const upstream = http.request({
     host: TARGET_HOST,
     port: TARGET_PORT,
     method: req.method,
     path,
-    headers: upstreamHeaders(req),
+    headers: upstreamHeaders(req, { htmlDocument }),
   })
   upstream.on('response', (upRes) => {
+    const contentType = String(upRes.headers['content-type'] ?? '')
+    const canPatch = htmlDocument
+      && (upRes.statusCode ?? 500) >= 200
+      && (upRes.statusCode ?? 500) < 300
+      && contentType.toLowerCase().includes('text/html')
+      && !upRes.headers['content-encoding']
+    if (canPatch) {
+      const chunks = []
+      upRes.on('data', (chunk) => chunks.push(chunk))
+      upRes.on('end', () => {
+        const result = injectRandomUuidPolyfill(Buffer.concat(chunks))
+        const headers = { ...upRes.headers }
+        if (result.changed) {
+          delete headers['transfer-encoding']
+          delete headers.etag
+          headers['content-length'] = result.body.length
+        }
+        res.writeHead(upRes.statusCode ?? 502, headers)
+        res.end(result.body)
+      })
+      return
+    }
     res.writeHead(upRes.statusCode ?? 502, upRes.headers)
     upRes.pipe(res)
   })
@@ -283,21 +432,29 @@ function json(res, code, body, extraHeaders = {}) {
   res.end(JSON.stringify(body))
 }
 
+const BODY_TOO_LARGE = Symbol('body-too-large')
+
 /** Read a small JSON body (≤64 KiB); resolves undefined on malformed input. */
 function readJsonBody(req) {
   return new Promise((resolve) => {
     let size = 0
+    let tooLarge = false
     const chunks = []
     req.on('data', (chunk) => {
+      if (tooLarge) return
       size += chunk.length
       if (size > 64 * 1024) {
-        req.destroy()
-        resolve(undefined)
+        tooLarge = true
+        chunks.length = 0
         return
       }
       chunks.push(chunk)
     })
     req.on('end', () => {
+      if (tooLarge) {
+        resolve(BODY_TOO_LARGE)
+        return
+      }
       try {
         resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')))
       } catch {
@@ -398,6 +555,10 @@ async function handle(req, res) {
       return
     }
     const body = await readJsonBody(req)
+    if (body === BODY_TOO_LARGE) {
+      json(res, 413, { error: 'payload_too_large' }, CORS_HEADERS)
+      return
+    }
     const code = typeof body?.code === 'string' ? body.code.trim() : ''
     if (!/^\d{6}$/.test(code) || !redeemPairCode(code)) {
       json(res, 403, { error: 'invalid_or_expired_code' }, CORS_HEADERS)
@@ -422,7 +583,8 @@ async function handle(req, res) {
       return
     }
     const code = mintPairCode()
-    json(res, 200, { code, expiresInSeconds: PAIR_CODE_TTL_MS / 1000 })
+    const info = announcePairingCode(code)
+    json(res, 200, info)
     return
   }
 
@@ -437,6 +599,10 @@ async function handle(req, res) {
       return
     }
     const body = await readJsonBody(req)
+    if (body === BODY_TOO_LARGE) {
+      json(res, 413, { error: 'payload_too_large' }, CORS_HEADERS)
+      return
+    }
     const credential = typeof body?.token === 'string' ? body.token : ''
     if (!accessTokenOk(credential)) {
       json(res, 401, { error: 'unauthorized' }, CORS_HEADERS)
@@ -532,6 +698,8 @@ server.timeout = 0
 
 server.listen(LISTEN_PORT, LISTEN_HOST, () => {
   console.log(`dsh-remote: ${SCHEME}://${LISTEN_HOST}:${LISTEN_PORT} -> http://${TARGET_AUTHORITY} (token required)`)
-  console.log(`dsh-remote: pairing code ${mintPairCode()} — single use, expires in 10 min`)
+  announcePairingCode(mintPairCode())
+  if (process.stdin.isTTY) console.log('dsh-remote: enter n and press Return for a new pairing QR')
   console.log('dsh-remote: mint more with  curl -X POST -H "Authorization: Bearer $DSH_REMOTE_TOKEN" <this-url>/pair/new')
+  enableTerminalPairing()
 })

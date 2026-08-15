@@ -3,3 +3,5 @@ releases/
 node_modules/
 *.log
 .DS_Store
+proxy/test-results/
+proxy/playwright-report/

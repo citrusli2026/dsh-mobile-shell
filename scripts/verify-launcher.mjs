@@ -13,11 +13,12 @@ function expect(condition, message) {
   if (!condition) throw new Error(message)
 }
 
-function launcherContext({ app = false } = {}) {
+function launcherContext({ app = false, hash = '', search = '', savedConnection } = {}) {
   const elements = new Map()
   const element = (id) => {
     if (!elements.has(id)) {
-      const classes = new Set()
+      const initiallyHidden = new Set(['savedCard', 'tokenForm', 'webHostLine'])
+      const classes = new Set(initiallyHidden.has(id) ? ['hidden'] : [])
       elements.set(id, {
         id,
         value: '',
@@ -35,7 +36,10 @@ function launcherContext({ app = false } = {}) {
     return elements.get(id)
   }
   const stored = new Map()
+  if (savedConnection) stored.set('dsh.connection', JSON.stringify(savedConnection))
   const assigned = []
+  const historyCalls = []
+  let fetchCalls = 0
   const context = vm.createContext({
     window: app ? { Capacitor: {} } : {},
     document: { body: element('body'), getElementById: element },
@@ -47,13 +51,16 @@ function launcherContext({ app = false } = {}) {
       origin: 'http://127.0.0.1:3081',
       host: '127.0.0.1:3081',
       pathname: '/',
-      search: '',
-      hash: '',
+      search,
+      hash,
       assign: (value) => assigned.push(value),
       replace: (value) => assigned.push(value),
     },
-    history: { replaceState() {} },
-    fetch: async () => { throw new Error('unexpected fetch in launcher unit check') },
+    history: { replaceState: (_state, _unused, value) => historyCalls.push(value) },
+    fetch: async () => {
+      fetchCalls += 1
+      throw new Error('unexpected fetch in launcher unit check')
+    },
     AbortController,
     URL,
     URLSearchParams,
@@ -62,7 +69,7 @@ function launcherContext({ app = false } = {}) {
     console,
   })
   vm.runInContext(script, context, { filename: launcherPath })
-  return { context, stored, assigned }
+  return { context, stored, assigned, elements, historyCalls, get fetchCalls() { return fetchCalls } }
 }
 
 const browser = launcherContext()
@@ -87,6 +94,29 @@ const browserSaved = JSON.parse(browser.stored.get('dsh.connection'))
 expect(browserSaved.base === 'https://example.test/', 'browser base was not saved')
 expect(browserSaved.token === undefined, 'browser persisted a token in localStorage')
 console.log('ok   browser localStorage contains no token')
+
+const qr = launcherContext({
+  hash: '#pair=381204',
+  savedConnection: { base: 'http://old-host.test:3081/', at: 1 },
+})
+expect(qr.elements.get('code').value === '381204', 'QR pairing code was not prefilled')
+expect(qr.elements.get('pairBtn').textContent === '确认配对并连接', 'QR confirmation label missing')
+expect(qr.elements.get('status').textContent.includes('请确认连接'), 'QR confirmation status missing')
+expect(qr.historyCalls[0] === '/', `QR fragment was not removed: ${JSON.stringify(qr.historyCalls)}`)
+expect(qr.fetchCalls === 0, 'QR link consumed the code without explicit confirmation')
+expect(qr.elements.get('savedCard').classList.contains('hidden'), 'saved host hid the QR pairing form')
+console.log('ok   QR fragment prefills once, clears the URL, and waits for confirmation')
+
+const invalidQr = launcherContext({ hash: '#pair=not-a-code' })
+expect(!invalidQr.elements.has('code') || invalidQr.elements.get('code').value === '', 'invalid QR code was accepted')
+expect(invalidQr.elements.get('status').textContent.includes('无效'), 'invalid QR error missing')
+expect(invalidQr.historyCalls[0] === '/', 'invalid QR fragment was not removed')
+console.log('ok   invalid QR fragments fail closed and are removed')
+
+const legacyQuery = launcherContext({ search: '?token=legacy-secret&keep=1', hash: '#pair=381204' })
+expect(legacyQuery.historyCalls[0] === '/?keep=1',
+  `legacy token query was not removed: ${JSON.stringify(legacyQuery.historyCalls)}`)
+console.log('ok   legacy token query is removed from launcher history')
 
 const app = launcherContext({ app: true })
 vm.runInContext("enterWithAppToken('http://host.test:3081/', 'device-token')", app.context)

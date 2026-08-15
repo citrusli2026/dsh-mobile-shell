@@ -15,7 +15,7 @@
 | [`scripts/`](scripts/) | 验证工具（启动页回归、真实 dsh HTTP/HTTPS/WSS 代理矩阵、CDP 驱动的 Android 端到端） |
 | [`docs/`](docs/) | 架构分析、可行性研究、PoC 实录，以及全部关键决策的 ADR |
 
-配套插件：[`dsh-mobile-ui`](https://github.com/citrusli2026/dsh-mobile-ui)——以树外客户端插件形式为主机 Web UI 提供移动导航（底部导航栏、会话抽屉）。壳不依赖它，它也不依赖壳。
+移动 UI 插件 `dsh-mobile-ui` 曾以树外客户端插件形式为主机 Web UI 提供移动导航（底部导航栏、会话抽屉），但原公开仓库当前无法访问，已放入 [移动端后移 backlog](docs/10-roadmap-to-release.md#8-androidios-后移-backlog)。在恢复并固定版本前不要按旧链接安装；基础壳和 Web 模式不依赖该插件。
 
 ## 快速开始
 
@@ -26,16 +26,18 @@ npx @deepseek-ai/dsh web --port 3080          # harness 照常跑在 loopback
 DSH_REMOTE_TOKEN=$(openssl rand -hex 16) node proxy/dsh-remote.mjs
 # dsh-remote: http://0.0.0.0:3081 -> http://127.0.0.1:3080 (token required)
 # dsh-remote: pairing code 847291 — single use, expires in 10 min
+# dsh-remote: pairing link http://192.168.1.10:3081/launch#pair=847291
+# 交互终端还会显示二维码；输入 n 回车可生成新的码/链接/二维码
 ```
 
 **2. 在手机上**（同一 Wi-Fi）——两种方式任选：
 
-- **Web 模式（零安装，ADR-0007）**：浏览器直接打开 `http://<电脑局域网IP>:3081/`——代理会自己吐出启动页。输入终端打印的**配对码**即可进入，主令牌全程不离开电脑。
+- **Web 模式（零安装，ADR-0007）**：直接扫描终端二维码，浏览器会打开启动页、清理扫码 fragment 并预填配对码；确认一次即可进入。也可打开 `http://<电脑局域网IP>:3081/` 手输终端打印的 6 位码。主令牌全程不离开电脑。
 - **App**：安装壳，填 `http://<电脑局域网IP>:3081` 与配对码（"令牌连接"保留为高级入口）。记忆主机后一键重连。
-  - **Android**：从 [Releases](../../releases) 直接下载 APK 安装。
+  - **Android**：从 [Releases](https://github.com/citrusli2026/dsh-mobile-shell/releases) 直接下载 APK 安装。
   - **iOS**：从源码构建（见下）或等待 TestFlight——苹果没有免签名的直接安装路径。
 
-> **Web 验证状态（2026-08-15）：已通过。** 已对真实发布版 `dsh web` 完成 HTTP 27/27、HTTPS/WSS 27/27 自动化矩阵，并在真实 Chromium 中完成“打开启动页 → 输入真实配对码 → 进入 DeepSeek Harness → 刷新后保持会话”的端到端验收。完整记录见 [Web 安全加固与验证实录](docs/09-web-security-hardening.md)。本结论不包含尚待下一阶段验证的移动端 App。
+> **Web 验证状态（2026-08-15）：已通过。** 已对真实发布版 `dsh web` 完成 HTTP 28/28、HTTPS/WSS 28/28 自动化矩阵；Playwright Chromium/WebKit 及移动 Chromium/WebKit 均完成“打开二维码深链 → 明确确认 → 进入 DeepSeek Harness → 刷新后保持会话”，本机安装的 Google Chrome 额外通过 2/2。完整记录见 [Web 安全加固与验证实录](docs/09-web-security-hardening.md)。本结论不包含实体 Safari 与尚待下一阶段验证的移动端 App。
 
 ## 从源码构建
 
@@ -69,12 +71,15 @@ xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Debug \
 | 1 | PoC：壳 + 令牌代理，双端模拟器局域网验证 | ✅ 已完成（[实录](docs/05-phase1-poc.md)） |
 | 2 | 配对码、代理可选 TLS | ✅ 已完成（[实录](docs/06-phase2-pairing-tls.md)） |
 | Web | 浏览器零安装、设备会话与安全加固 | ✅ 已完成并通过端到端验证（[实录](docs/09-web-security-hardening.md)） |
-| 3 | 移动 UI 打磨（`dsh-mobile-ui`）、内置资产离线壳、TestFlight / 商店 | 进行中——[真机验证清单](docs/07-real-device-verification.md) |
+| 3 | Web 二维码、完整设备生命周期、管理/部署体验与国际化 | Web-first 进行中——[路线图](docs/10-roadmap-to-release.md) |
+| 4 | Android/iOS 构建、签名、移动 UI 与真机发行门禁 | 后移——[真机清单](docs/07-real-device-verification.md) |
+| 5 | 推送、完整离线壳等高成本体验功能 | Web 稳定后评估 |
 
 ## 文档
 
 - [docs/README.md](docs/README.md)——总索引：项目分析、构建与依赖指南、可行性研究、PoC 实录
-- [docs/decisions/](docs/decisions/)——ADR-0001…0008，每个关键决策一份
+- [Web 二维码配对实录](docs/11-web-qr-pairing.md)——离线二维码、扫码深链与验证结果
+- [docs/decisions/](docs/decisions/)——ADR-0001…0009，每个关键决策一份
 
 ## 许可证
 

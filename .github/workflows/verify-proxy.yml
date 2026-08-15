@@ -20,7 +20,15 @@ jobs:
           node-version: 22
 
       - name: Verify launcher behavior
-        run: node scripts/verify-launcher.mjs
+        run: |
+          node scripts/verify-launcher.mjs
+          node scripts/verify-pairing-qr.mjs
+
+      - name: Install Web E2E dependencies
+        run: npm ci --prefix proxy
+
+      - name: Install Web E2E browsers
+        run: npx --prefix proxy playwright install --with-deps chromium webkit
 
       - name: Install the published dsh CLI
         run: npm install -g @deepseek-ai/dsh
@@ -34,11 +42,19 @@ jobs:
           done
           echo "dsh web did not become ready"; cat dsh.log; exit 1
 
-      - name: Start dsh-remote and run the smoke matrix
+      - name: Start dsh-remote
         run: |
           DSH_REMOTE_TOKEN=ci-test-token-123456 node proxy/dsh-remote.mjs > proxy.log 2>&1 &
           sleep 1
-          DSH_REMOTE_TOKEN=ci-test-token-123456 node scripts/verify-proxy.mjs
+
+      - name: Run Web E2E in Chromium, WebKit, and mobile viewports
+        env:
+          DSH_REMOTE_TOKEN: ci-test-token-123456
+          E2E_BASE_URL: http://127.0.0.1:3081
+        run: npm run test:e2e --prefix proxy
+
+      - name: Run the HTTP smoke matrix after browser E2E
+        run: DSH_REMOTE_TOKEN=ci-test-token-123456 node scripts/verify-proxy.mjs
 
       - name: Run the TLS variant of the matrix (self-signed test cert)
         run: |

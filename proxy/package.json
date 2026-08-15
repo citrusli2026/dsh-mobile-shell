@@ -8,10 +8,16 @@
     "dsh-remote": "./dsh-remote.mjs"
   },
   "scripts": {
-    "start": "node dsh-remote.mjs"
+    "start": "node dsh-remote.mjs",
+    "test:e2e": "playwright test",
+    "test:e2e:chrome": "playwright test --project=chromium",
+    "test:e2e:safari": "playwright test --project=webkit"
   },
   "engines": {
     "node": ">=20"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "@playwright/test": "^1.59.1"
+  }
 }

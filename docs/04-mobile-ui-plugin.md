@@ -1,5 +1,7 @@
 # 04 移动 UI 插件（dsh-mobile-ui）：实施与验证
 
+> 分发状态（2026-08-15）：本文是历史实现实录，原外部仓库当前无法访问，插件暂不可复现安装。恢复源码、归仓和固定版本已放入 [10 的移动端后移 backlog](10-roadmap-to-release.md#8-androidios-后移-backlog)。
+
 本文记录阶段 3"移动体验"缺口的首个交付：树外客户端插件 `dsh-mobile-ui` 的实现内容与端到端验证结果。决策依据见 [ADR-0003](decisions/ADR-0003-mobile-ui-out-of-tree-plugin.md)；上游契约论断均标注文件路径，可复核。
 
 ## 1. 交付物
@@ -47,7 +49,7 @@
 
 ## 4. 已知限制
 
-见插件 README（[en](https://github.com/citrusli2026/dsh-mobile-ui#known-limitations) / [zh](https://github.com/citrusli2026/dsh-mobile-ui/blob/main/README.zh.md#已知限制))。要点：详情面板移动端不可达（布局冻结几何，需上游改动）;Hero 页无操作条（会话作用域座位）；存量组件内部密度属上游 PR 轨道，与本插件并行。
+原插件 README 当前不可访问；当时记录的限制是：详情面板移动端不可达（布局冻结几何，需上游改动）；Hero 页无操作条（会话作用域座位）；存量组件内部密度属上游 PR 轨道，与本插件并行。恢复移动迭代时必须重新验证，不能直接沿用历史结论。
 
 ## 5. 后续任务
 

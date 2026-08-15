@@ -106,6 +106,20 @@
 <script>
 const $ = (id) => document.getElementById(id)
 const STORE_KEY = 'dsh.connection'
+const FRAGMENT = new URLSearchParams(location.hash.slice(1))
+const QR_PAIR_CODE = FRAGMENT.get('pair')
+const APP_SESSION_TOKEN = FRAGMENT.get('dsh-session')
+const CLEAN_QUERY = new URLSearchParams(location.search)
+CLEAN_QUERY.delete('token')
+const CLEAN_SEARCH = CLEAN_QUERY.toString()
+  ? '?' + CLEAN_QUERY.toString()
+  : ''
+if (QR_PAIR_CODE !== null || APP_SESSION_TOKEN !== null || location.search !== CLEAN_SEARCH) {
+  // Pairing/session fragments and legacy token queries are never sent to the
+  // server and are removed immediately so they do not remain in history or
+  // copied URLs.
+  history.replaceState(null, '', location.pathname + CLEAN_SEARCH)
+}
 
 // 载体识别（ADR-0007）：Capacitor 会注入 window.Capacitor；纯浏览器打开
 // dsh-remote 时没有它，此时主机就是当前源，地址框隐藏，只需填配对码/令牌。
@@ -229,7 +243,7 @@ async function connectWithCode(base, code) {
 
 // ── saved connection ─────────────────────────────────────────────────────
 const saved = load()
-if (saved && saved.base) {
+if (saved && saved.base && QR_PAIR_CODE === null && APP_SESSION_TOKEN === null) {
   $('savedCard').classList.remove('hidden')
   $('picker').classList.add('hidden')
   $('savedHost').textContent = saved.base
@@ -247,17 +261,29 @@ if (saved && saved.base) {
   }
 }
 
+// QR links carry only the short-lived single-use pairing code. Prefill it but
+// require one explicit confirmation so link previewers cannot consume a code.
+if (QR_PAIR_CODE !== null) {
+  $('savedCard').classList.add('hidden')
+  $('picker').classList.remove('hidden')
+  if (/^\d{6}$/.test(QR_PAIR_CODE)) {
+    $('code').value = QR_PAIR_CODE
+    $('pairBtn').textContent = '确认配对并连接'
+    say('ok', '已从二维码填入配对码，请确认连接')
+    $('pairBtn').focus()
+  } else {
+    say('err', '二维码中的配对码无效，请重新扫描')
+  }
+}
+
 // App-to-remote session handoff. The device token is carried only in a URL
 // fragment, immediately removed, and exchanged for an HttpOnly cookie.
-const fragment = new URLSearchParams(location.hash.slice(1))
-const fragmentToken = fragment.get('dsh-session')
-if (fragmentToken) {
-  history.replaceState(null, '', location.pathname + location.search)
+if (APP_SESSION_TOKEN) {
   say('', '正在建立安全会话…')
   fetch(location.origin + '/session', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ token: fragmentToken }),
+    body: JSON.stringify({ token: APP_SESSION_TOKEN }),
   }).then((res) => {
     if (!res.ok) throw new Error('设备会话已失效，请重新配对')
     location.replace(location.origin + '/')
