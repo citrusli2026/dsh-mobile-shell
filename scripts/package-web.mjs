@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url'
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const outputRoot = path.join(repoRoot, 'dist', 'web')
-const webPackageJson = JSON.parse(readFileSync(path.join(repoRoot, 'proxy', 'package.json'), 'utf8'))
+const rootPackageJson = JSON.parse(readFileSync(path.join(repoRoot, 'package.json'), 'utf8'))
 
 const files = [
   ['app/www/index.html', 'app/www/index.html'],
@@ -35,7 +35,7 @@ for (const [source, target] of files) {
 const manifest = {
   format: 'dsh-mobile-shell-web',
   formatVersion: 1,
-  version: webPackageJson.version,
+  version: rootPackageJson.version,
   runtime: { node: '>=20' },
   entrypoints: {
     proxy: 'proxy/dsh-remote.mjs',
@@ -46,7 +46,7 @@ const manifest = {
 writeFileSync(path.join(outputRoot, 'web-artifact.json'), `${JSON.stringify(manifest, null, 2)}\n`)
 writeFileSync(path.join(outputRoot, 'package.json'), `${JSON.stringify({
   name: 'dsh-mobile-shell-web',
-  version: webPackageJson.version,
+  version: rootPackageJson.version,
   private: true,
   type: 'module',
   scripts: { start: 'node start.mjs' },

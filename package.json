@@ -1,12 +1,13 @@
 {
   "name": "dsh-mobile-shell",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "description": "Web artifact packager for the dsh mobile shell",
   "type": "module",
   "scripts": {
-    "package:web": "node scripts/package-web.mjs",
-    "verify:web": "node scripts/verify-web-artifact.mjs",
+    "verify:version": "node scripts/verify-version.mjs",
+    "package:web": "npm run verify:version && node scripts/package-web.mjs",
+    "verify:web": "npm run verify:version && node scripts/verify-web-artifact.mjs",
     "start:web": "node dist/web/start.mjs"
   },
   "engines": {

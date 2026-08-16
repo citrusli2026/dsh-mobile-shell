@@ -1,6 +1,6 @@
 {
   "name": "@dsh-mobile/remote",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "description": "dsh-remote: token-guard reverse proxy exposing a loopback dsh web host to the LAN/mobile app",
   "type": "module",

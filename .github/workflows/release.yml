@@ -4,15 +4,57 @@ on:
   push:
     tags: ['v*']
 
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
+  validate-version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Verify release tag
+        run: node scripts/verify-version.mjs "$GITHUB_REF_NAME"
+
   android:
+    needs: validate-version
     uses: ./.github/workflows/build-android.yml
 
   ios:
+    needs: validate-version
     uses: ./.github/workflows/build-ios.yml
 
+  web:
+    needs: validate-version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Build and verify Web artifact
+        run: npm run package:web && npm run verify:web
+
+      - name: Archive Web artifact
+        run: tar -czf "dsh-mobile-shell-${GITHUB_REF_NAME}-web.tar.gz" -C dist/web .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dsh-mobile-web-artifact
+          path: dsh-mobile-shell-${{ github.ref_name }}-web.tar.gz
+
   publish:
-    needs: [android, ios]
+    needs: [android, ios, web]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -28,6 +70,8 @@ jobs:
             "release/dsh-mobile-shell-${GITHUB_REF_NAME}-android-debug.apk"
           cp dist/dsh-mobile-ios-simulator-app/DSH-simulator.app.zip \
             "release/dsh-mobile-shell-${GITHUB_REF_NAME}-ios-simulator.app.zip"
+          cp "dist/dsh-mobile-web-artifact/dsh-mobile-shell-${GITHUB_REF_NAME}-web.tar.gz" \
+            "release/dsh-mobile-shell-${GITHUB_REF_NAME}-web.tar.gz"
           ls -la release
 
       - name: Publish GitHub Release
@@ -36,10 +80,10 @@ jobs:
           files: release/*
           generate_release_notes: true
           body: |
-            Android：直接下载 APK 安装。iOS：当前为模拟器包，真机/TestFlight 见路线图阶段 3。
+            Android：直接下载 APK 安装。Web：解压后按 README 启动代理。iOS：当前为模拟器包，真机/TestFlight 见路线图阶段 3。
 
             国内下载加速：在 Release 资产 URL 前加 `https://ghproxy.net/` 前缀。
 
-            Android: install the APK directly. iOS: simulator build for now — device distribution (TestFlight) is phase 3.
+            Android: install the APK directly. Web: extract the archive and follow the README. iOS: simulator build for now — device distribution (TestFlight) is phase 3.
 
             China mirror: prefix any asset URL with `https://ghproxy.net/`.

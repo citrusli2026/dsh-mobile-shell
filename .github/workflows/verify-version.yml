@@ -1,0 +1,54 @@
+name: verify-version
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [main]
+    paths:
+      - 'package.json'
+      - 'proxy/package.json'
+      - 'proxy/package-lock.json'
+      - 'app/package.json'
+      - 'app/package-lock.json'
+      - 'app/android/app/build.gradle'
+      - 'app/ios/App/App.xcodeproj/project.pbxproj'
+      - 'scripts/package-web.mjs'
+      - 'scripts/verify-version.mjs'
+      - 'scripts/verify-web-artifact.mjs'
+      - '.github/workflows/verify-version.yml'
+  pull_request:
+    paths:
+      - 'package.json'
+      - 'proxy/package.json'
+      - 'proxy/package-lock.json'
+      - 'app/package.json'
+      - 'app/package-lock.json'
+      - 'app/android/app/build.gradle'
+      - 'app/ios/App/App.xcodeproj/project.pbxproj'
+      - 'scripts/package-web.mjs'
+      - 'scripts/verify-version.mjs'
+      - 'scripts/verify-web-artifact.mjs'
+      - '.github/workflows/verify-version.yml'
+
+concurrency:
+  group: verify-version-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Verify synchronized project version
+        run: npm run verify:version
+
+      - name: Package Web artifact
+        run: npm run package:web
+
+      - name: Verify Web artifact
+        run: npm run verify:web

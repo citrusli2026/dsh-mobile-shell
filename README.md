@@ -31,7 +31,7 @@ npm run verify:web
 `dist/web/web-artifact.json` is the integration contract. It declares the `proxy`, `launcher`, and `pairing` entrypoints plus the artifact format version. Desktop consumers read the manifest instead of depending on this repository's source layout, so source changes can remain local to this repository. The directory can be released directly or archived:
 
 ```sh
-tar -czf dist/dsh-mobile-shell-web-0.1.0.tar.gz -C dist/web .
+tar -czf dist/dsh-mobile-shell-v1.0.0-web.tar.gz -C dist/web .
 ```
 
 An external host starts `dsh web` on loopback and the artifact proxy as separate processes:
@@ -46,6 +46,17 @@ node dist/web/start.mjs
 The proxy listens on `0.0.0.0:3081` by default and serves the Web launcher, one-time pairing codes, and pairing URLs. Override it with `DSH_LISTEN_HOST`, `DSH_LISTEN_PORT`, `DSH_TARGET_HOST`, and `DSH_TARGET_PORT`. For public access also configure `DSH_TLS_CERT`, `DSH_TLS_KEY`, and a trusted `DSH_PUBLIC_URL`. Plain HTTP is for a trusted LAN or mesh network only; do not port-forward it.
 
 For desktop integration, build `dist/web` in this repository first, then run `DSH_MOBILE_SHELL_WEB_ROOT=/absolute/path/dsh-mobile-shell/dist/web pnpm run build` in `dsh-desktop`. The Electron installer carries only this Web artifact; Android/iOS remain a separate release surface of this repository.
+
+## Versioning
+
+The current project version is `1.0.0`, declared once in the root `package.json`. The proxy package, Capacitor package, Android `versionName`, iOS `MARKETING_VERSION`, and Web artifact manifest are checked against it:
+
+```sh
+npm run verify:version
+npm run package:web
+```
+
+Release tags use the `v<version>` form; validate one explicitly with `node scripts/verify-version.mjs v1.0.0` before publishing. Pushing a matching tag runs the Android, iOS, and Web builds and publishes all three assets. Existing historical tags are not rewritten.
 
 ## Quick start: start / scan / confirm
 

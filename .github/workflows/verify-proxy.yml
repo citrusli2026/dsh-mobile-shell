@@ -8,6 +8,10 @@ on:
   pull_request:
     paths: ['proxy/**', 'app/www/**', 'scripts/**', '.github/workflows/verify-proxy.yml']
 
+concurrency:
+  group: verify-proxy-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   smoke:
     runs-on: ubuntu-latest
@@ -21,6 +25,7 @@ jobs:
 
       - name: Verify launcher behavior
         run: |
+          node scripts/verify-version.mjs
           node scripts/verify-launcher.mjs
           node scripts/verify-pairing-qr.mjs
 
@@ -36,9 +41,11 @@ jobs:
       - name: Start dsh web (loopback)
         run: |
           dsh web --port 3080 > dsh.log 2>&1 &
-          for i in $(seq 1 60); do
+          attempt=1
+          while [ "$attempt" -le 60 ]; do
             curl -sf -o /dev/null http://127.0.0.1:3080/ && exit 0
             sleep 1
+            attempt=$((attempt + 1))
           done
           echo "dsh web did not become ready"; cat dsh.log; exit 1
 
