@@ -76,3 +76,17 @@ export function renderTerminalQr(text, border = 4) {
   }
   return lines.join('\n')
 }
+
+/** Render the same encoder output as a self-contained SVG for Web hosts. */
+export function renderSvgQr(text, border = 4) {
+  if (!Number.isInteger(border) || border < 0) throw new Error('QR border must be a non-negative integer')
+  const qr = qrcodegen.QrCode.encodeText(text, qrcodegen.QrCode.Ecc.MEDIUM)
+  const size = qr.size + border * 2
+  const modules = []
+  for (let y = 0; y < qr.size; y += 1) {
+    for (let x = 0; x < qr.size; x += 1) {
+      if (qr.getModule(x, y)) modules.push(`<rect x="${x + border}" y="${y + border}" width="1" height="1"/>`)
+    }
+  }
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}" role="img" aria-label="LAN pairing QR code" shape-rendering="crispEdges"><rect width="100%" height="100%" fill="#fff"/><g fill="#000">${modules.join('')}</g></svg>`
+}

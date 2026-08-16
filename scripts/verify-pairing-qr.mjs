@@ -4,6 +4,7 @@ import {
   discoverPublicBases,
   normalizePublicBase,
   pairingUrls,
+  renderSvgQr,
   renderTerminalQr,
 } from '../proxy/pairing-qr.mjs'
 
@@ -66,5 +67,9 @@ const digest = crypto.createHash('sha256').update(rendered).digest('hex')
 expect(digest === 'eedb73fb0476e384de885e25507428380e6369f3f99a7c655891a4cfe54b6d78',
   `terminal QR snapshot changed: ${digest}`)
 console.log('ok   terminal QR matches the pinned encoder snapshot')
+
+const svg = renderSvgQr(url)
+expect(svg.startsWith('<svg ') && svg.includes('LAN pairing QR code'), 'SVG QR renderer returned invalid markup')
+console.log('ok   SVG QR renderer is available to Web hosts')
 
 console.log('\nall pairing QR checks passed')

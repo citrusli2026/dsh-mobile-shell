@@ -17,6 +17,36 @@
 
 移动 UI 插件 `dsh-mobile-ui` 曾以树外客户端插件形式为主机 Web UI 提供移动导航（底部导航栏、会话抽屉），但原公开仓库当前无法访问，已放入 [移动端后移 backlog](docs/10-roadmap-to-release.md#8-androidios-后移-backlog)。在恢复并固定版本前不要按旧链接安装；基础壳和 Web 模式不依赖该插件。
 
+## Web 产物：给桌面端或外部主机使用
+
+Web 集成与 Capacitor 工程隔离。根目录脚本只打包运行所需的 Node 代理、启动页和二维码模块，不包含 `app/android`、`app/ios`、原生依赖或开发工具：
+
+```sh
+cd dsh-mobile-shell
+npm run package:web
+# 产物：dist/web/
+npm run verify:web
+```
+
+`dist/web/web-artifact.json` 是稳定的集成契约，声明 `proxy`、`launcher` 和 `pairing` 三个入口以及格式版本。桌面端只读取这个 manifest；因此本仓库内部可以继续调整源码目录，桌面端不需要跟着改路径。发布时可直接分发目录，或打成压缩包：
+
+```sh
+tar -czf dist/dsh-mobile-shell-web-0.1.0.tar.gz -C dist/web .
+```
+
+外部主机只需自行启动 loopback 上的 `dsh web`，再启动产物中的代理；两者是独立进程：
+
+```sh
+npx @deepseek-ai/dsh web --port 3080
+DSH_REMOTE_TOKEN="$(openssl rand -hex 16)" \
+DSH_TARGET_PORT=3080 \
+node dist/web/start.mjs
+```
+
+默认代理监听 `0.0.0.0:3081`，会提供 Web 启动页、一次性配对码和二维码所需的配对 URL。可用 `DSH_LISTEN_HOST`、`DSH_LISTEN_PORT`、`DSH_TARGET_HOST`、`DSH_TARGET_PORT` 覆盖地址；公网使用时还应同时配置 `DSH_TLS_CERT`、`DSH_TLS_KEY` 和可信的 `DSH_PUBLIC_URL`。明文 HTTP 只适用于可信局域网或组网网络，不要做端口转发。
+
+桌面端集成示例：先在本仓库生成 `dist/web`，再在 `dsh-desktop` 中执行 `DSH_MOBILE_SHELL_WEB_ROOT=/绝对路径/dsh-mobile-shell/dist/web pnpm run build`。Electron 安装包只携带这一份 Web 产物，Android/iOS 工程仍属于本仓库的独立发布面。
+
 ## 快速开始：启动 / 扫码 / 确认
 
 推荐只执行这一条命令；它会自动启动 loopback 上的 `dsh web` 和局域网代理，选择一个私有局域网 IPv4，生成本次运行专用的随机主令牌，并打印离线二维码：

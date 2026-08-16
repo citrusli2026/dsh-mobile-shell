@@ -17,6 +17,36 @@ A community, open-source **mobile shell** for [DeepSeek Harness](https://github.
 
 The `dsh-mobile-ui` companion previously supplied mobile navigation chrome (bottom bar and session drawer) as an out-of-tree client plugin, but its former public repository is currently unavailable. Its in-repo recovery is now in the [deferred mobile backlog](docs/10-roadmap-to-release.md#8-androidios-后移-backlog). Do not follow old installation links until a version is pinned; the base shell and Web mode do not depend on it.
 
+## Web artifact: for desktop and external hosts
+
+The Web integration is isolated from the Capacitor projects. The root package script produces only the Node proxy, launcher, and QR module required at runtime; `app/android`, `app/ios`, native dependencies, and development tools are excluded:
+
+```sh
+cd dsh-mobile-shell
+npm run package:web
+# artifact: dist/web/
+npm run verify:web
+```
+
+`dist/web/web-artifact.json` is the integration contract. It declares the `proxy`, `launcher`, and `pairing` entrypoints plus the artifact format version. Desktop consumers read the manifest instead of depending on this repository's source layout, so source changes can remain local to this repository. The directory can be released directly or archived:
+
+```sh
+tar -czf dist/dsh-mobile-shell-web-0.1.0.tar.gz -C dist/web .
+```
+
+An external host starts `dsh web` on loopback and the artifact proxy as separate processes:
+
+```sh
+npx @deepseek-ai/dsh web --port 3080
+DSH_REMOTE_TOKEN="$(openssl rand -hex 16)" \
+DSH_TARGET_PORT=3080 \
+node dist/web/start.mjs
+```
+
+The proxy listens on `0.0.0.0:3081` by default and serves the Web launcher, one-time pairing codes, and pairing URLs. Override it with `DSH_LISTEN_HOST`, `DSH_LISTEN_PORT`, `DSH_TARGET_HOST`, and `DSH_TARGET_PORT`. For public access also configure `DSH_TLS_CERT`, `DSH_TLS_KEY`, and a trusted `DSH_PUBLIC_URL`. Plain HTTP is for a trusted LAN or mesh network only; do not port-forward it.
+
+For desktop integration, build `dist/web` in this repository first, then run `DSH_MOBILE_SHELL_WEB_ROOT=/absolute/path/dsh-mobile-shell/dist/web pnpm run build` in `dsh-desktop`. The Electron installer carries only this Web artifact; Android/iOS remain a separate release surface of this repository.
+
 ## Quick start: start / scan / confirm
 
 Run one command on the computer. It starts `dsh web` on loopback and the LAN proxy, selects one private LAN IPv4, generates a fresh random master token in memory, and prints an offline QR:
