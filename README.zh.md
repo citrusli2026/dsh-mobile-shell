@@ -12,27 +12,37 @@
 |---|---|
 | [`app/`](app/) | Capacitor 8 双端壳：配对启动页（主机地址 + 设备会话，可记忆），随后 WebView 直接加载主机伺服的原版前端——App 与主机版本永不脱节 |
 | [`proxy/`](proxy/) | `dsh-remote`：零依赖 Node ≥20 反代。`dsh web` 保持 loopback（上游刻意禁止绑 `0.0.0.0`），代理负责网络可达、逐请求（含 WebSocket 握手）的常量时间令牌门，并直接伺服启动页（Web 模式，ADR-0007） |
-| [`scripts/`](scripts/) | 验证工具（启动页回归、真实 dsh HTTP/HTTPS/WSS 代理矩阵、CDP 驱动的 Android 端到端） |
+| [`scripts/`](scripts/) | 一键安全局域网启动与验证工具（启动页回归、真实 dsh HTTP/HTTPS/WSS 代理矩阵、CDP 驱动的 Android 端到端） |
 | [`docs/`](docs/) | 架构分析、可行性研究、PoC 实录，以及全部关键决策的 ADR |
 
 移动 UI 插件 `dsh-mobile-ui` 曾以树外客户端插件形式为主机 Web UI 提供移动导航（底部导航栏、会话抽屉），但原公开仓库当前无法访问，已放入 [移动端后移 backlog](docs/10-roadmap-to-release.md#8-androidios-后移-backlog)。在恢复并固定版本前不要按旧链接安装；基础壳和 Web 模式不依赖该插件。
 
-## 快速开始
+## 快速开始：启动 / 扫码 / 确认
 
-**1. 在电脑上**——启动主机与代理：
+推荐只执行这一条命令；它会自动启动 loopback 上的 `dsh web` 和局域网代理，选择一个私有局域网 IPv4，生成本次运行专用的随机主令牌，并打印离线二维码：
 
 ```sh
-npx @deepseek-ai/dsh web --port 3080          # harness 照常跑在 loopback
-DSH_REMOTE_TOKEN=$(openssl rand -hex 16) node proxy/dsh-remote.mjs
-# dsh-remote: http://0.0.0.0:3081 -> http://127.0.0.1:3080 (token required)
-# dsh-remote: pairing code 847291 — single use, expires in 10 min
-# dsh-remote: pairing link http://192.168.1.10:3081/launch#pair=847291
-# 交互终端还会显示二维码；输入 n 回车可生成新的码/链接/二维码
+node scripts/start-lan.mjs
 ```
 
-**2. 在手机上**（同一 Wi-Fi）——两种方式任选：
+然后只需三个步骤：
 
-- **Web 模式（零安装，ADR-0007）**：直接扫描终端二维码，浏览器会打开启动页、清理扫码 fragment 并预填配对码；确认一次即可进入。也可打开 `http://<电脑局域网IP>:3081/` 手输终端打印的 6 位码。主令牌全程不离开电脑。
+1. **启动**：在电脑上运行上面的命令，并保持终端运行。
+2. **扫码**：手机与电脑连接同一 Wi-Fi，扫描终端二维码。
+3. **确认**：手机浏览器点击一次“确认配对并连接”，直接进入 Harness。
+
+扫码场景不需要输入 IP、配对码或令牌。脚本拒绝公网 IP、`0.0.0.0` 和继承的公网/TLS 配置；如果电脑有多个局域网地址，可显式指定：`DSH_LAN_IP=192.168.1.23 node scripts/start-lan.mjs`。明文 HTTP 仍只适用于可信局域网，不要做路由器端口转发。
+
+高级模式才需要分别启动主机与代理：
+
+```sh
+npx @deepseek-ai/dsh web --port 3080
+DSH_REMOTE_TOKEN=$(openssl rand -hex 16) node proxy/dsh-remote.mjs
+```
+
+**手机**（同一 Wi-Fi）——也可以使用 App：
+
+- **Web 模式（零安装，ADR-0007）**：扫描终端二维码后，浏览器会打开启动页、清理扫码 fragment 并预填配对码；确认一次即可进入。主令牌全程不离开电脑。
 - **App**：安装壳，填 `http://<电脑局域网IP>:3081` 与配对码（"令牌连接"保留为高级入口）。记忆主机后一键重连。
   - **Android**：从 [Releases](https://github.com/citrusli2026/dsh-mobile-shell/releases) 直接下载 APK 安装。
   - **iOS**：从源码构建（见下）或等待 TestFlight——苹果没有免签名的直接安装路径。

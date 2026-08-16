@@ -12,27 +12,37 @@ A community, open-source **mobile shell** for [DeepSeek Harness](https://github.
 |---|---|
 | [`app/`](app/) | Capacitor 8 shell for Android & iOS: a pairing launcher (host + scoped device session, remembered), then the WebView loads the exact frontend your host serves — app and host versions never diverge |
 | [`proxy/`](proxy/) | `dsh-remote`: a zero-dependency Node ≥20 reverse proxy. `dsh web` stays on loopback (upstream deliberately refuses `0.0.0.0`); the proxy owns network reachability, a constant-time token gate for every HTTP request and WebSocket handshake, and serves the launcher page itself (web mode, ADR-0007) |
-| [`scripts/`](scripts/) | Verification tooling (launcher regression, real-dsh HTTP/HTTPS/WSS proxy matrix, and CDP-driven Android E2E) |
+| [`scripts/`](scripts/) | One-command secure LAN launcher plus verification tooling (launcher regression, real-dsh HTTP/HTTPS/WSS proxy matrix, and CDP-driven Android E2E) |
 | [`docs/`](docs/) | Analysis, feasibility study, PoC runbook, and every design decision as ADRs |
 
 The `dsh-mobile-ui` companion previously supplied mobile navigation chrome (bottom bar and session drawer) as an out-of-tree client plugin, but its former public repository is currently unavailable. Its in-repo recovery is now in the [deferred mobile backlog](docs/10-roadmap-to-release.md#8-androidios-后移-backlog). Do not follow old installation links until a version is pinned; the base shell and Web mode do not depend on it.
 
-## Quick start
+## Quick start: start / scan / confirm
 
-**1. On your computer** — start the host and the proxy:
+Run one command on the computer. It starts `dsh web` on loopback and the LAN proxy, selects one private LAN IPv4, generates a fresh random master token in memory, and prints an offline QR:
 
 ```sh
-npx @deepseek-ai/dsh web --port 3080          # the harness, loopback as usual
-DSH_REMOTE_TOKEN=$(openssl rand -hex 16) node proxy/dsh-remote.mjs
-# dsh-remote: http://0.0.0.0:3081 -> http://127.0.0.1:3080 (token required)
-# dsh-remote: pairing code 847291 — single use, expires in 10 min
-# dsh-remote: pairing link http://192.168.1.10:3081/launch#pair=847291
-# An interactive terminal also shows a QR; enter n + Return to mint a new one.
+node scripts/start-lan.mjs
 ```
 
-**2. On your phone** (same Wi-Fi) — two ways in:
+Then use exactly three steps:
 
-- **Web mode (zero install, ADR-0007)**: scan the terminal QR. The browser opens the launcher, removes the scan fragment, and prefills the short code; confirm once to enter. You can still open `http://<computer-LAN-IP>:3081/` and type the printed six-digit code. The master token never leaves your computer.
+1. **Start**: run the command and keep its terminal open.
+2. **Scan**: connect the phone and computer to the same Wi-Fi, then scan the terminal QR.
+3. **Confirm**: tap “确认配对并连接” once in the phone browser; the Harness opens.
+
+The scan flow requires no IP, pairing-code, or token entry. The helper rejects public IPs, `0.0.0.0`, and inherited public/TLS configuration; if the computer has multiple LAN addresses, select one explicitly with `DSH_LAN_IP=192.168.1.23 node scripts/start-lan.mjs`. Plain HTTP is still for trusted LANs only—do not port-forward it.
+
+Advanced users can start the host and proxy separately:
+
+```sh
+npx @deepseek-ai/dsh web --port 3080
+DSH_REMOTE_TOKEN=$(openssl rand -hex 16) node proxy/dsh-remote.mjs
+```
+
+**On the phone** (same Wi-Fi) — App is also available:
+
+- **Web mode (zero install, ADR-0007)**: scan the terminal QR. The browser opens the launcher, removes the scan fragment, and prefills the short code; confirm once to enter. The master token never leaves your computer.
 - **App**: install the shell, enter `http://<computer-LAN-IP>:3081` and the pairing code (token entry remains as an advanced option). A remembered host gives one-tap reconnect.
   - **Android**: download the APK from [Releases](https://github.com/citrusli2026/dsh-mobile-shell/releases) and install directly.
   - **iOS**: build from source (below) or join TestFlight when available — Apple has no direct-install path for unsigned builds.

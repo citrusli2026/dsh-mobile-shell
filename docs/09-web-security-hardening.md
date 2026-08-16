@@ -10,6 +10,7 @@
 | `app/www/index.html` | Web 不再存令牌；配对直接使用服务端 Cookie；手工令牌经 `/session` 换 Cookie；兼容交接使用 fragment；修复显式 HTTP/HTTPS 标准端口和自定义端口解析；启动时清除 fragment 和 legacy `?token=`；页面自身增加 CSP 与 no-referrer |
 | `scripts/verify-proxy.mjs` | 扩充为 28 项真实上游矩阵，覆盖设备会话、降权、篡改、权限边界、同源检查、畸形 HTTP/WS、超大请求体与存活性 |
 | `scripts/verify-launcher.mjs` | 直接执行实际内联脚本，回归地址解析、Web 存储、legacy 查询清理和 fragment 交接 |
+| `scripts/start-lan.mjs` | 一键安全局域网启动：只选择私有 IPv4、随机生成进程内主令牌、启动 loopback `dsh web` 与代理，终端输出扫码三步流程 |
 | `proxy/e2e/` + `proxy/playwright.config.mjs` | 可复现的 Chromium/WebKit、移动 Chromium/WebKit 浏览器 E2E：二维码深链、用户确认、HttpOnly 会话、刷新保活、无效码不兑换、页面错误/网络失败收集 |
 | `.github/workflows/verify-proxy.yml` | 启动页变更纳入触发路径；安装 Playwright 浏览器；在 HTTP 代理矩阵后运行四个浏览器/移动视口项目 |
 | `app/package.json` | 修复 iOS 构建脚本指向不存在的 workspace；移除不存在的 verify 脚本；用 npm override 将开发链 `uuid` 提升到 11.1.1 |
@@ -22,8 +23,10 @@
 node --check proxy/dsh-remote.mjs
 node --check scripts/verify-proxy.mjs
 node --check scripts/verify-launcher.mjs
+node --check scripts/start-lan.mjs
 node scripts/verify-launcher.mjs
 node scripts/verify-pairing-qr.mjs
+node scripts/verify-start-lan.mjs
 
 # 分别启动 HTTP 与自签 TLS 代理后
 DSH_REMOTE_TOKEN=<test-token> node scripts/verify-proxy.mjs
@@ -39,6 +42,9 @@ DSH_REMOTE_TOKEN=<test-token> E2E_BASE_URL=http://127.0.0.1:3081 \
 E2E_USE_INSTALLED_CHROME=1 DSH_REMOTE_TOKEN=<test-token> \
   npm run test:e2e:chrome --prefix proxy
 
+# 面向普通局域网使用的一键入口（启动 dsh + 代理，随后只需扫码/确认）
+node scripts/start-lan.mjs
+
 # 原生构建门禁
 npm ci --prefix app
 npm run sync --prefix app
@@ -48,7 +54,7 @@ npm run build:android --prefix app  # 需要本机 Android SDK
 
 | 验证层 | 结果 |
 |---|---|
-| Node 语法检查 | ✅ 代理与两份验证脚本全部通过 |
+| Node 语法检查 | ✅ 代理、启动脚本与验证脚本全部通过 |
 | 启动页脚本回归 | ✅ 地址解析、Web 不存令牌、fragment 交接、legacy 查询清理全部通过 |
 | 真实 dsh HTTP 矩阵 | ✅ 28/28 |
 | 真实 dsh HTTPS/WSS 矩阵 | ✅ 28/28 |

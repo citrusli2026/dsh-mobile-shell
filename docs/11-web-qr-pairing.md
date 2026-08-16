@@ -5,7 +5,8 @@
 ## 1. 用户流程
 
 ```text
-启动 dsh-remote
+运行 `node scripts/start-lan.mjs`
+  → 脚本自动启动 loopback `dsh web` 与局域网代理，选择私有 IPv4 并生成随机主令牌
   → 终端打印单次码、可复制 /launch#pair=… 链接和二维码
   → 手机扫码
   → 启动页立即清理 fragment 并预填 6 位码
@@ -22,6 +23,7 @@
 |---|---|
 | `proxy/pairing-qr.mjs` | public Origin 校验、LAN IPv4 发现、安全配对 URL 和 ANSI 终端 QR 渲染 |
 | `proxy/vendor/qrcodegen.mjs` | Project Nayuki v1.8.0 的 TypeScript 编译结果；完整 MIT notice 保留，无运行时 npm 依赖 |
+| `scripts/start-lan.mjs` | 普通用户的一键安全入口：启动上下游、自动选私有 IPv4、拒绝公网配置、随机生成进程内主令牌 |
 | `proxy/dsh-remote.mjs` | 启动/`n`/`POST /pair/new` 三条签码入口统一输出 pairing info；支持 `DSH_PUBLIC_URL`、`DSH_PAIR_QR` |
 | `app/www/index.html` | 读取并立即清除 `#pair=`；有效码预填并等待确认，无效码明确报错；已有 saved host 不遮挡扫码页 |
 | `scripts/verify-pairing-qr.mjs` | public URL、网卡发现、fragment URL、无长期 token 和 QR 编码快照 |
@@ -42,6 +44,6 @@
 
 ## 4. 当前边界
 
-- 自动发现会列出所有非 internal IPv4，不能推断用户想用 Wi-Fi、Tailscale 还是其他网卡；有明确入口时设置 `DSH_PUBLIC_URL`。
+- 高级 `dsh-remote` 模式在通配监听时会列出所有非 internal IPv4；推荐的 `start-lan` 模式只选择一个 RFC1918 私有 IPv4 并绑定到该地址。多网卡选错时用 `DSH_LAN_IP` 指定 Wi-Fi 地址，不要把 `DSH_PUBLIC_URL` 用在局域网启动脚本上。
 - 终端 QR 依赖 ANSI 颜色和交互 TTY；`NO_COLOR`、重定向日志或 `DSH_PAIR_QR=off` 时只显示文本链接，功能不受影响。
 - 当前 QR 只解决首次配对；设备列表、吊销、退出/忘记主机属于路线图 W2。
