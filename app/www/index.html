@@ -4,89 +4,351 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<meta name="color-scheme" content="dark" />
+<meta name="color-scheme" content="light" />
 <meta name="referrer" content="no-referrer" />
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src http: https:; base-uri 'none'; form-action 'self'" />
 <title>DSH — 连接主机</title>
 <style>
+  /* ── Design Tokens ── */
   :root {
-    --bg: #0d1117; --panel: #161b22; --line: #2d333b; --text: #e6edf3;
-    --muted: #8b949e; --accent: #4c8dff; --ok: #3fb950; --err: #f85149;
+    --bg: #ffffff;
+    --bg-secondary: #f7f7f8;
+    --surface: #ffffff;
+    --border: #e5e5e8;
+    --border-strong: #d1d1d6;
+    --text: #1a1a1a;
+    --text-secondary: #6b6b6b;
+    --text-tertiary: #a1a1a6;
+    --accent: #3667f6;
+    --accent-hover: #2851e3;
+    --accent-dim: rgba(54, 103, 246, 0.08);
+    --ok: #10b981;
+    --ok-dim: rgba(16, 185, 129, 0.08);
+    --err: #ef4444;
+    --err-dim: rgba(239, 68, 68, 0.08);
+    --shadow-sm: 0 1px 2px rgba(0,0,0,0.04), 0 1px 3px rgba(0,0,0,0.02);
+    --shadow-md: 0 4px 12px rgba(0,0,0,0.05), 0 1px 2px rgba(0,0,0,0.03);
+    --shadow-lg: 0 12px 40px rgba(0,0,0,0.07), 0 4px 12px rgba(0,0,0,0.04);
+    --radius-sm: 8px;
+    --radius-md: 12px;
+    --radius-lg: 16px;
+    --ease-reveal: cubic-bezier(0.22, 1, 0.36, 1);
+    --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
   }
+
+  /* ── Reset & Base ── */
   * { box-sizing: border-box; margin: 0; }
+  html { -webkit-tap-highlight-color: transparent; }
   body {
-    background: var(--bg); color: var(--text); min-height: 100dvh;
-    font: 15px/1.6 -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100dvh;
+    font: 16px/1.6 "Inter", -apple-system, "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
     display: flex; align-items: center; justify-content: center;
-    padding: calc(env(safe-area-inset-top) + 24px) 24px calc(env(safe-area-inset-bottom) + 24px);
+    padding: calc(env(safe-area-inset-top) + 24px) 20px calc(env(safe-area-inset-bottom) + 24px);
+    overflow-x: hidden;
+    position: relative;
   }
-  main { width: 100%; max-width: 400px; }
-  h1 { font-size: 28px; letter-spacing: .02em; }
-  h1 span { color: var(--accent); }
-  .sub { color: var(--muted); margin: 6px 0 24px; }
-  .tabs { display: flex; gap: 8px; margin-bottom: 4px; }
+
+  /* ── Subtle background texture ── */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background:
+      radial-gradient(ellipse 60% 50% at 50% 0%, rgba(54, 103, 246, 0.035), transparent),
+      radial-gradient(ellipse 40% 40% at 80% 100%, rgba(54, 103, 246, 0.02), transparent);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  main {
+    width: 100%; max-width: 420px;
+    position: relative; z-index: 1;
+  }
+
+  /* ── Brand Header ── */
+  .brand {
+    text-align: center;
+    margin-bottom: 40px;
+    opacity: 0;
+    transform: translateY(12px);
+    animation: reveal 0.6s var(--ease-reveal) 0.05s forwards;
+  }
+  .brand__logo {
+    width: 48px; height: 48px;
+    margin: 0 auto 20px;
+    background: var(--accent);
+    border-radius: var(--radius-md);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px; font-weight: 700; color: #fff;
+    letter-spacing: -0.02em;
+    box-shadow: var(--shadow-md);
+  }
+  .brand__title {
+    font-size: 28px; font-weight: 700;
+    letter-spacing: -0.03em; line-height: 1.2;
+    color: var(--text);
+  }
+  .brand__sub {
+    color: var(--text-secondary);
+    font-size: 15px; margin-top: 8px;
+    line-height: 1.5;
+    font-weight: 400;
+  }
+
+  /* ── Card ── */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 28px;
+    opacity: 0;
+    transform: translateY(16px);
+    animation: reveal 0.6s var(--ease-reveal) 0.15s forwards;
+    box-shadow: var(--shadow-lg);
+  }
+
+  /* ── Saved Connection ── */
+  .saved__host {
+    font-weight: 600; font-size: 15px;
+    word-break: break-all; color: var(--text);
+    letter-spacing: -0.01em;
+  }
+  .saved__meta {
+    color: var(--text-tertiary);
+    font-size: 13px; margin: 6px 0 24px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .saved__meta::before {
+    content: '';
+    width: 6px; height: 6px;
+    background: var(--ok);
+    border-radius: 50%;
+    box-shadow: 0 0 0 2px var(--ok-dim);
+  }
+
+  /* ── Tabs ── */
+  .tabs {
+    display: flex; gap: 4px;
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+    padding: 4px;
+    margin-bottom: 24px;
+    position: relative;
+  }
+  .tabs__track {
+    position: absolute;
+    top: 4px; bottom: 4px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: calc(var(--radius-md) - 2px);
+    box-shadow: var(--shadow-sm);
+    transition: transform 0.3s var(--ease-spring), width 0.3s var(--ease-spring);
+    z-index: 0;
+  }
   .tabs button {
-    flex: 1; margin: 0; padding: 9px; font-size: 14px; font-weight: 500;
-    background: var(--panel); color: var(--muted); border: 1px solid var(--line);
+    flex: 1; position: relative; z-index: 1;
+    margin: 0; padding: 10px 8px;
+    font-size: 14px; font-weight: 500;
+    background: transparent; color: var(--text-secondary);
+    border: none; border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: color 0.2s ease;
+    -webkit-appearance: none; appearance: none;
   }
-  .tabs button.active { color: var(--text); border-color: var(--accent); }
-  .tabs button:first-child { border-radius: 10px 0 0 10px; }
-  .tabs button:last-child { border-radius: 0 10px 10px 0; }
-  label { display: block; color: var(--muted); font-size: 13px; margin: 18px 0 6px; }
+  .tabs button.active { color: var(--text); }
+
+  /* ── Form Elements ── */
+  label {
+    display: block;
+    color: var(--text-secondary);
+    font-size: 13px; font-weight: 500;
+    margin: 20px 0 8px;
+    letter-spacing: 0.01em;
+  }
   input {
-    width: 100%; padding: 12px 14px; border-radius: 10px; font: inherit;
-    background: var(--panel); border: 1px solid var(--line); color: var(--text);
+    width: 100%; padding: 12px 14px;
+    border-radius: var(--radius-md);
+    font: inherit; font-size: 15px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    color: var(--text);
     outline: none;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+    -webkit-appearance: none; appearance: none;
   }
-  input:focus { border-color: var(--accent); }
-  input#code { font-size: 22px; letter-spacing: .35em; text-align: center; }
-  button {
-    width: 100%; margin-top: 26px; padding: 13px; border: 0; border-radius: 10px;
-    background: var(--accent); color: #fff; font: 600 16px/1 inherit; cursor: pointer;
+  input::placeholder { color: var(--text-tertiary); }
+  input:focus {
+    background: var(--surface);
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-dim);
   }
-  button:disabled { opacity: .55; }
-  .ghost { background: transparent; color: var(--muted); border: 1px solid var(--line); margin-top: 12px; }
-  .hint { color: var(--muted); font-size: 12.5px; margin-top: 10px; }
-  .status { margin-top: 16px; font-size: 14px; min-height: 22px; }
+  input#code {
+    font-size: 26px; font-weight: 600;
+    letter-spacing: 0.3em; text-align: center;
+    font-variant-numeric: tabular-nums;
+    padding: 16px 14px 16px calc(14px + 0.15em);
+  }
+  input#code::placeholder {
+    font-size: 20px; letter-spacing: 0.25em;
+    font-weight: 400; color: var(--text-tertiary);
+  }
+
+  /* ── Buttons ── */
+  .btn {
+    width: 100%; margin-top: 24px; padding: 13px;
+    border: none; border-radius: var(--radius-md);
+    font: 600 15px/1.5 inherit;
+    cursor: pointer;
+    -webkit-appearance: none; appearance: none;
+    position: relative; overflow: hidden;
+    transition: transform 0.1s ease, background 0.2s ease, box-shadow 0.2s ease;
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+  }
+  .btn:active { transform: scale(0.98); }
+  .btn:disabled {
+    opacity: 0.45; cursor: not-allowed;
+    transform: none;
+  }
+  .btn--primary {
+    background: var(--accent);
+    color: #fff;
+    box-shadow: var(--shadow-sm);
+  }
+  .btn--primary:hover:not(:disabled) {
+    background: var(--accent-hover);
+    box-shadow: 0 4px 16px rgba(54, 103, 246, 0.25);
+  }
+  .btn--ghost {
+    background: transparent;
+    color: var(--text-secondary);
+    border: 1px solid var(--border);
+    margin-top: 10px;
+    box-shadow: none;
+  }
+  .btn--ghost:hover:not(:disabled) {
+    border-color: var(--border-strong);
+    color: var(--text);
+    background: var(--bg-secondary);
+  }
+
+  /* ── Hints & Status ── */
+  .hint {
+    color: var(--text-tertiary);
+    font-size: 13px; line-height: 1.55;
+    margin-top: 10px;
+  }
+  .status {
+    margin-top: 16px; font-size: 14px; min-height: 22px;
+    text-align: center;
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+    opacity: 0;
+    transition: opacity 0.25s ease;
+  }
+  .status.visible { opacity: 1; }
   .status.ok { color: var(--ok); }
   .status.err { color: var(--err); }
-  .saved { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-bottom: 8px; }
-  .saved .host { font-weight: 600; word-break: break-all; }
-  .saved .meta { color: var(--muted); font-size: 13px; margin-top: 2px; }
-  .hidden { display: none; }
-  /* Web 模式（浏览器直开 dsh-remote）：主机就是当前源，地址输入不显示 */
+  .status__dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .status.ok .status__dot { background: var(--ok); }
+  .status.err .status__dot { background: var(--err); }
+
+  /* ── Web Host Line ── */
+  .web-host {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 14px;
+    background: var(--ok-dim);
+    border: 1px solid rgba(16, 185, 129, 0.12);
+    border-radius: var(--radius-md);
+    color: #059669;
+    font-size: 13px; font-weight: 500;
+    margin-bottom: 4px;
+    opacity: 0;
+    animation: reveal 0.5s var(--ease-reveal) 0.35s forwards;
+  }
+  .web-host svg { flex-shrink: 0; }
+
+  /* ── Hidden utility ── */
+  .hidden { display: none !important; }
+
+  /* Web mode: hide server fields */
   body.web .server-field { display: none; }
+
+  /* ── Keyframes ── */
+  @keyframes reveal {
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+
+  /* ── Loading spinner ── */
+  .spinner {
+    width: 16px; height: 16px;
+    border: 2px solid rgba(255,255,255,0.35);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    display: none;
+  }
+  .btn:disabled .spinner { display: block; }
+  .btn:disabled .btn__text { opacity: 0.7; }
+
+  /* ── Reduced motion ── */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
 </style>
 </head>
 <body>
 <main>
-  <h1>DSH<span>·移动版</span></h1>
-  <p class="sub">连接你的 DeepSeek Harness 主机（dsh web），功能与桌面版一致。</p>
+  <div class="brand">
+    <div class="brand__logo">DSH</div>
+    <h1 class="brand__title">DSH 连接器</h1>
+    <p class="brand__sub">连接你的 DeepSeek Harness 主机</p>
+  </div>
 
-  <section id="savedCard" class="saved hidden">
-    <div class="host" id="savedHost"></div>
-    <div class="meta">已保存的主机</div>
-    <button id="continueBtn">继续连接</button>
-    <button id="changeBtn" class="ghost">更换主机</button>
+  <section id="savedCard" class="card hidden">
+    <div class="saved__host" id="savedHost"></div>
+    <div class="saved__meta">已保存的主机</div>
+    <button id="continueBtn" class="btn btn--primary">
+      <span class="spinner"></span>
+      <span class="btn__text">继续连接</span>
+    </button>
+    <button id="changeBtn" class="btn btn--ghost">更换主机</button>
   </section>
 
-  <div id="picker">
+  <div id="picker" class="card">
     <div class="tabs">
+      <div class="tabs__track" id="tabTrack"></div>
       <button id="tabPair" class="active" type="button">配对码连接</button>
       <button id="tabToken" type="button">令牌连接</button>
     </div>
 
     <form id="pairForm">
-      <p class="hint hidden" id="webHostLine"></p>
+      <div id="webHostLine" class="web-host hidden">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        <span id="webHostText"></span>
+      </div>
       <label for="pairServer" class="server-field">主机地址</label>
       <input id="pairServer" class="server-field" inputmode="url" autocapitalize="off" autocorrect="off"
              placeholder="例如 192.168.1.10:3081" />
       <label for="code">配对码</label>
       <input id="code" inputmode="numeric" maxlength="6" autocomplete="one-time-code"
-             placeholder="· · · · · ·" />
-      <p class="hint">主机启动 dsh-remote 时会打印一个 6 位配对码（单次使用、10 分钟有效）。</p>
-      <button id="pairBtn" type="submit">配对并连接</button>
+             placeholder="000000" />
+      <p class="hint">主机启动 dsh-remote 时会打印一个 6 位配对码（单次使用、10 分钟有效）</p>
+      <button id="pairBtn" type="submit" class="btn btn--primary">
+        <span class="spinner"></span>
+        <span class="btn__text">配对并连接</span>
+      </button>
     </form>
 
     <form id="tokenForm" class="hidden">
@@ -96,11 +358,17 @@
       <label for="token">访问令牌（token）</label>
       <input id="token" type="password" autocapitalize="off" autocorrect="off"
              placeholder="dsh-remote 代理上配置的令牌" />
-      <button id="connectBtn" type="submit">连接</button>
+      <button id="connectBtn" type="submit" class="btn btn--primary">
+        <span class="spinner"></span>
+        <span class="btn__text">连接</span>
+      </button>
     </form>
-  </div>
 
-  <p id="status" class="status" role="status"></p>
+    <p id="status" class="status" role="status">
+      <span class="status__dot"></span>
+      <span id="statusText"></span>
+    </p>
+  </div>
 </main>
 
 <script>
@@ -115,21 +383,31 @@ const CLEAN_SEARCH = CLEAN_QUERY.toString()
   ? '?' + CLEAN_QUERY.toString()
   : ''
 if (QR_PAIR_CODE !== null || APP_SESSION_TOKEN !== null || location.search !== CLEAN_SEARCH) {
-  // Pairing/session fragments and legacy token queries are never sent to the
-  // server and are removed immediately so they do not remain in history or
-  // copied URLs.
   history.replaceState(null, '', location.pathname + CLEAN_SEARCH)
 }
 
-// 载体识别（ADR-0007）：Capacitor 会注入 window.Capacitor；纯浏览器打开
-// dsh-remote 时没有它，此时主机就是当前源，地址框隐藏，只需填配对码/令牌。
+/* ── Carrier detection ── */
 const IS_APP = typeof window.Capacitor !== 'undefined'
 if (!IS_APP) {
   document.body.classList.add('web')
   $('pairServer').value = location.origin + '/'
   $('server').value = location.origin + '/'
   $('webHostLine').classList.remove('hidden')
-  $('webHostLine').textContent = '当前主机：' + location.host
+  $('webHostText').textContent = location.host
+}
+
+/* ── Tab track animation ── */
+const tabTrack = $('tabTrack')
+const tabPair = $('tabPair')
+const tabToken = $('tabToken')
+function updateTabTrack() {
+  const active = document.querySelector('.tabs button.active')
+  if (!active || !tabTrack) return
+  const parent = active.parentElement
+  const parentRect = parent.getBoundingClientRect()
+  const rect = active.getBoundingClientRect()
+  tabTrack.style.transform = `translateX(${rect.left - parentRect.left - 4}px)`
+  tabTrack.style.width = `${rect.width}px`
 }
 
 function normalize(input) {
@@ -139,8 +417,6 @@ function normalize(input) {
   const s = hasScheme ? raw : 'http://' + raw
   const url = new URL(s)
   if (!url.hostname) throw new Error('主机地址无效')
-  // Bare LAN hosts keep the convenient proxy default. An explicit scheme
-  // keeps its standard port (http:80 / https:443) instead of being rewritten.
   if (!hasScheme && !url.port) url.port = '3081'
   url.pathname = '/'
   url.search = ''
@@ -153,8 +429,6 @@ function load() {
 }
 function save(base, token) {
   const connection = { base, at: Date.now() }
-  // Browsers keep only an HttpOnly cookie. The bundled App may retain a scoped
-  // device token at its private launcher origin for one-tap reconnect.
   if (IS_APP && token) connection.token = token
   localStorage.setItem(STORE_KEY, JSON.stringify(connection))
 }
@@ -169,22 +443,27 @@ async function healthcheck(base) {
 }
 
 function setBusy(busy) {
-  for (const id of ['connectBtn', 'pairBtn', 'continueBtn']) $(id).disabled = busy
+  for (const id of ['connectBtn', 'pairBtn', 'continueBtn']) {
+    const btn = $(id)
+    if (btn) btn.disabled = busy
+  }
 }
 function say(kind, text) {
   const el = $('status')
-  el.className = 'status' + (kind ? ' ' + kind : '')
-  el.textContent = text
+  const txt = $('statusText')
+  el.className = 'status' + (kind ? ' ' + kind : '') + (text ? ' visible' : '')
+  txt.textContent = text
 }
 function fail(e) {
-  say('err', e && e.name === 'AbortError' ? '连不上主机：超时，请确认主机与手机在同一局域网' : String(e.message || e))
+  const msg = e && e.name === 'AbortError'
+    ? '连不上主机：超时，请确认主机与手机在同一局域网'
+    : String(e.message || e)
+  say('err', msg)
 }
 
 function enterWithAppToken(base, token) {
   save(base, token)
   say('ok', '已连接，正在进入…')
-  // The fragment never reaches HTTP access logs. The remote launcher consumes
-  // it through POST /session, clears it, then enters the authenticated UI.
   location.assign(base + '#dsh-session=' + encodeURIComponent(token))
 }
 
@@ -241,7 +520,7 @@ async function connectWithCode(base, code) {
   } catch (e) { fail(e) } finally { setBusy(false) }
 }
 
-// ── saved connection ─────────────────────────────────────────────────────
+/* ── Saved connection ── */
 const saved = load()
 if (saved && saved.base && QR_PAIR_CODE === null && APP_SESSION_TOKEN === null) {
   $('savedCard').classList.remove('hidden')
@@ -257,27 +536,29 @@ if (saved && saved.base && QR_PAIR_CODE === null && APP_SESSION_TOKEN === null) 
   $('changeBtn').onclick = () => {
     $('savedCard').classList.add('hidden')
     $('picker').classList.remove('hidden')
-    $('server').focus()
+    requestAnimationFrame(() => {
+      updateTabTrack()
+      $('server').focus()
+    })
   }
 }
 
-// QR links carry only the short-lived single-use pairing code. Prefill it but
-// require one explicit confirmation so link previewers cannot consume a code.
+/* ── QR prefill ── */
 if (QR_PAIR_CODE !== null) {
   $('savedCard').classList.add('hidden')
   $('picker').classList.remove('hidden')
   if (/^\d{6}$/.test(QR_PAIR_CODE)) {
     $('code').value = QR_PAIR_CODE
-    $('pairBtn').textContent = '确认配对并连接'
+    const btn = $('pairBtn')
+    btn.querySelector('.btn__text').textContent = '确认配对并连接'
     say('ok', '已从二维码填入配对码，请确认连接')
-    $('pairBtn').focus()
+    requestAnimationFrame(() => btn.focus())
   } else {
     say('err', '二维码中的配对码无效，请重新扫描')
   }
 }
 
-// App-to-remote session handoff. The device token is carried only in a URL
-// fragment, immediately removed, and exchanged for an HttpOnly cookie.
+/* ── App session handoff ── */
 if (APP_SESSION_TOKEN) {
   say('', '正在建立安全会话…')
   fetch(location.origin + '/session', {
@@ -290,19 +571,21 @@ if (APP_SESSION_TOKEN) {
   }).catch(fail)
 }
 
-// ── mode tabs ────────────────────────────────────────────────────────────
-$('tabPair').onclick = () => {
-  $('tabPair').classList.add('active'); $('tabToken').classList.remove('active')
+/* ── Mode tabs ── */
+tabPair.onclick = () => {
+  tabPair.classList.add('active'); tabToken.classList.remove('active')
   $('pairForm').classList.remove('hidden'); $('tokenForm').classList.add('hidden')
+  updateTabTrack()
   $('pairServer').focus()
 }
-$('tabToken').onclick = () => {
-  $('tabToken').classList.add('active'); $('tabPair').classList.remove('active')
+tabToken.onclick = () => {
+  tabToken.classList.add('active'); tabPair.classList.remove('active')
   $('tokenForm').classList.remove('hidden'); $('pairForm').classList.add('hidden')
+  updateTabTrack()
   $('server').focus()
 }
 
-// ── forms ────────────────────────────────────────────────────────────────
+/* ── Forms ── */
 $('pairForm').onsubmit = (e) => {
   e.preventDefault()
   let url
@@ -318,6 +601,24 @@ $('tokenForm').onsubmit = (e) => {
   const token = $('token').value.trim()
   if (!token) { say('err', '请填写访问令牌'); return }
   connectWithToken(url.origin + '/', token)
+}
+
+/* ── Auto-focus & tab track init ── */
+window.addEventListener('DOMContentLoaded', () => {
+  updateTabTrack()
+  if ($('savedCard').classList.contains('hidden')) {
+    const visibleForm = $('pairForm').classList.contains('hidden') ? $('tokenForm') : $('pairForm')
+    const firstInput = visibleForm.querySelector('input:not(.hidden)')
+    if (firstInput) firstInput.focus()
+  }
+  if (document.fonts && document.fonts.ready) {
+    document.fonts.ready.then(() => requestAnimationFrame(updateTabTrack))
+  }
+})
+
+/* ── Resize observer for tab track ── */
+if (typeof ResizeObserver !== 'undefined') {
+  new ResizeObserver(updateTabTrack).observe(document.querySelector('.tabs'))
 }
 </script>
 </body>
