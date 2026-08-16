@@ -30,6 +30,9 @@ function launcherContext({ app = false, hash = '', search = '', savedConnection 
           remove: (...names) => names.forEach((name) => classes.delete(name)),
           contains: (name) => classes.has(name),
         },
+        querySelector: (selector) => selector === '.btn__text'
+          ? element(`${id}Text`)
+          : null,
         focus() {},
       })
     }
@@ -41,7 +44,7 @@ function launcherContext({ app = false, hash = '', search = '', savedConnection 
   const historyCalls = []
   let fetchCalls = 0
   const context = vm.createContext({
-    window: app ? { Capacitor: {} } : {},
+    window: app ? { Capacitor: {}, addEventListener() {} } : { addEventListener() {} },
     document: { body: element('body'), getElementById: element },
     localStorage: {
       getItem: (key) => stored.get(key) ?? null,
@@ -66,6 +69,7 @@ function launcherContext({ app = false, hash = '', search = '', savedConnection 
     URLSearchParams,
     setTimeout,
     clearTimeout,
+    requestAnimationFrame: (callback) => callback(),
     console,
   })
   vm.runInContext(script, context, { filename: launcherPath })
@@ -100,8 +104,8 @@ const qr = launcherContext({
   savedConnection: { base: 'http://old-host.test:3081/', at: 1 },
 })
 expect(qr.elements.get('code').value === '381204', 'QR pairing code was not prefilled')
-expect(qr.elements.get('pairBtn').textContent === '确认配对并连接', 'QR confirmation label missing')
-expect(qr.elements.get('status').textContent.includes('请确认连接'), 'QR confirmation status missing')
+expect(qr.elements.get('pairBtnText').textContent === '确认配对并连接', 'QR confirmation label missing')
+expect(qr.elements.get('statusText').textContent.includes('请确认连接'), 'QR confirmation status missing')
 expect(qr.historyCalls[0] === '/', `QR fragment was not removed: ${JSON.stringify(qr.historyCalls)}`)
 expect(qr.fetchCalls === 0, 'QR link consumed the code without explicit confirmation')
 expect(qr.elements.get('savedCard').classList.contains('hidden'), 'saved host hid the QR pairing form')
@@ -109,7 +113,7 @@ console.log('ok   QR fragment prefills once, clears the URL, and waits for confi
 
 const invalidQr = launcherContext({ hash: '#pair=not-a-code' })
 expect(!invalidQr.elements.has('code') || invalidQr.elements.get('code').value === '', 'invalid QR code was accepted')
-expect(invalidQr.elements.get('status').textContent.includes('无效'), 'invalid QR error missing')
+expect(invalidQr.elements.get('statusText').textContent.includes('无效'), 'invalid QR error missing')
 expect(invalidQr.historyCalls[0] === '/', 'invalid QR fragment was not removed')
 console.log('ok   invalid QR fragments fail closed and are removed')
 

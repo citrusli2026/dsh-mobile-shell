@@ -200,7 +200,8 @@
   .btn {
     width: 100%; margin-top: 24px; padding: 13px;
     border: none; border-radius: var(--radius-md);
-    font: 600 15px/1.5 inherit;
+    font: inherit;
+    font-size: 15px; font-weight: 600; line-height: 1.5;
     cursor: pointer;
     -webkit-appearance: none; appearance: none;
     position: relative; overflow: hidden;
@@ -393,7 +394,7 @@ if (!IS_APP) {
   $('pairServer').value = location.origin + '/'
   $('server').value = location.origin + '/'
   $('webHostLine').classList.remove('hidden')
-  $('webHostText').textContent = location.host
+  $('webHostText').textContent = '当前主机：' + location.host
 }
 
 /* ── Tab track animation ── */
@@ -576,13 +577,13 @@ tabPair.onclick = () => {
   tabPair.classList.add('active'); tabToken.classList.remove('active')
   $('pairForm').classList.remove('hidden'); $('tokenForm').classList.add('hidden')
   updateTabTrack()
-  $('pairServer').focus()
+  $(IS_APP ? 'pairServer' : 'code').focus()
 }
 tabToken.onclick = () => {
   tabToken.classList.add('active'); tabPair.classList.remove('active')
   $('tokenForm').classList.remove('hidden'); $('pairForm').classList.add('hidden')
   updateTabTrack()
-  $('server').focus()
+  $(IS_APP ? 'server' : 'token').focus()
 }
 
 /* ── Forms ── */
@@ -607,8 +608,10 @@ $('tokenForm').onsubmit = (e) => {
 window.addEventListener('DOMContentLoaded', () => {
   updateTabTrack()
   if ($('savedCard').classList.contains('hidden')) {
-    const visibleForm = $('pairForm').classList.contains('hidden') ? $('tokenForm') : $('pairForm')
-    const firstInput = visibleForm.querySelector('input:not(.hidden)')
+    const pairMode = !$('pairForm').classList.contains('hidden')
+    const firstInput = $(IS_APP
+      ? (pairMode ? 'pairServer' : 'server')
+      : (pairMode ? 'code' : 'token'))
     if (firstInput) firstInput.focus()
   }
   if (document.fonts && document.fonts.ready) {
