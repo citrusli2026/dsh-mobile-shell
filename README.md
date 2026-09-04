@@ -45,6 +45,8 @@ node dist/web/start.mjs
 
 The proxy listens on `0.0.0.0:3081` by default and serves the Web launcher, one-time pairing codes, and pairing URLs. Override it with `DSH_LISTEN_HOST`, `DSH_LISTEN_PORT`, `DSH_TARGET_HOST`, and `DSH_TARGET_PORT`. For public access also configure `DSH_TLS_CERT`, `DSH_TLS_KEY`, and a trusted `DSH_PUBLIC_URL`. Plain HTTP is for a trusted LAN or mesh network only; do not port-forward it.
 
+**Device management:** every paired device is registered in `DSH_STATE_FILE` (default `proxy/dsh-devices.json`; mode 0600, atomic writes, a corrupt file refuses to start). Open `/admin` in a browser, enter the master token, and list devices (name, issued, last used, expiry), revoke one individually, mint a fresh pairing code, or download an SVG QR. The launcher offers "sign out this device" / "forget this host", and a revoked or expired session shows a clear re-pair state instead of a bare 401. Rotating `DSH_REMOTE_TOKEN` revokes every device at once. See [ADR-0010](docs/decisions/ADR-0010-device-registry-admin-i18n.md) and the [reverse proxy & networking guide](docs/12-reverse-proxy-and-networking.md).
+
 For desktop integration, build `dist/web` in this repository first, then run `DSH_MOBILE_SHELL_WEB_ROOT=/absolute/path/dsh-mobile-shell/dist/web pnpm run build` in `dsh-desktop`. The Electron installer carries only this Web artifact; Android/iOS remain a separate release surface of this repository.
 
 ## Versioning
@@ -88,7 +90,7 @@ DSH_REMOTE_TOKEN=$(openssl rand -hex 16) node proxy/dsh-remote.mjs
   - **Android**: download the APK from [Releases](https://github.com/citrusli2026/dsh-mobile-shell/releases) and install directly.
   - **iOS**: build from source (below) or join TestFlight when available — Apple has no direct-install path for unsigned builds.
 
-> **Web verification status (2026-08-15): passed.** The published `dsh web` completed the HTTP 28/28 and HTTPS/WSS 28/28 automated matrices. Playwright Chromium/WebKit plus mobile Chromium/WebKit passed the full flow: open QR deep link → explicit confirmation → land in DeepSeek Harness → reload with the session intact. The installed Google Chrome channel also passed 2/2. See the [Web hardening and verification report](docs/09-web-security-hardening.md). This result does not claim that physical Safari or the mobile app has completed its next verification stage.
+> **Web verification status (2026-09-04): passed.** Against a real `dsh web`, the extended automated matrices completed HTTP 36/36 and HTTPS/WSS 36/36 (token gate, WS, cross-site, pairing, device lifecycle: revoke/logout/expiry/corrupt-state/restart). The device lifecycle matrix passed 18/18 standalone. Playwright Chromium, WebKit, mobile Chrome and mobile Safari passed 24/24: QR deep link → confirm → Harness → session survives reload, sign-out, server-side revoke with re-pair recovery, the /admin console, and the zh/en language toggle. See the [hardening report](docs/09-web-security-hardening.md) and [roadmap](docs/10-roadmap-to-release.md).
 
 ## Build from source
 

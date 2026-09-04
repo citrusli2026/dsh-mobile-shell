@@ -15,7 +15,9 @@ const rootPackageJson = JSON.parse(readFileSync(path.join(repoRoot, 'package.jso
 
 const files = [
   ['app/www/index.html', 'app/www/index.html'],
+  ['app/www/admin.html', 'app/www/admin.html'],
   ['proxy/dsh-remote.mjs', 'proxy/dsh-remote.mjs'],
+  ['proxy/device-store.mjs', 'proxy/device-store.mjs'],
   ['proxy/pairing-qr.mjs', 'proxy/pairing-qr.mjs'],
   ['proxy/vendor/qrcodegen.mjs', 'proxy/vendor/qrcodegen.mjs'],
   ['web/start.mjs', 'start.mjs'],

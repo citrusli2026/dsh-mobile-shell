@@ -20,6 +20,9 @@ export default defineConfig({
   expect: { timeout: 15_000 },
   use: {
     baseURL,
+    // The launcher negotiates zh/en from the browser locale; the E2E asserts
+    // the zh surface (the en surface is covered by the toggle test).
+    locale: 'zh-CN',
     actionTimeout: 15_000,
     navigationTimeout: 30_000,
     trace: 'retain-on-failure',

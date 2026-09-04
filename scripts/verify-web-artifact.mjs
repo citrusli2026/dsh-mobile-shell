@@ -43,6 +43,11 @@ const launcher = readFileSync(launcherPath, 'utf8')
 if (!launcher.includes('dsh-remote') || !launcher.includes("fetch(base + 'pair'")) {
   throw new Error('launcher does not look like the dsh Web launcher')
 }
+const adminPath = path.join(path.dirname(launcherPath), 'admin.html')
+if (!existsSync(adminPath)) throw new Error('admin console is missing next to the launcher')
+if (!readFileSync(path.join(path.dirname(proxyPath), 'device-store.mjs'), 'utf8').includes('export function deviceActive')) {
+  throw new Error('device-store module is missing from the Web artifact')
+}
 for (const forbidden of ['app/android', 'app/ios', 'node_modules']) {
   if (existsSync(path.join(artifactRoot, forbidden))) throw new Error(`forbidden path in Web artifact: ${forbidden}`)
 }

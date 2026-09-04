@@ -75,6 +75,7 @@
     opacity: 0;
     transform: translateY(12px);
     animation: reveal 0.6s var(--ease-reveal) 0.05s forwards;
+    position: relative;
   }
   .brand__logo {
     width: 48px; height: 48px;
@@ -97,6 +98,19 @@
     line-height: 1.5;
     font-weight: 400;
   }
+  .lang {
+    position: absolute; top: -8px; right: -8px;
+    padding: 4px 10px;
+    font: inherit; font-size: 12px; font-weight: 500;
+    color: var(--text-secondary);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    cursor: pointer;
+    -webkit-appearance: none; appearance: none;
+    transition: border-color 0.2s ease, color 0.2s ease;
+  }
+  .lang:hover { border-color: var(--border-strong); color: var(--text); }
 
   /* ── Card ── */
   .card {
@@ -128,6 +142,15 @@
     border-radius: 50%;
     box-shadow: 0 0 0 2px var(--ok-dim);
   }
+  .saved__meta.expired { color: var(--err); }
+  .saved__meta.expired::before {
+    background: var(--err);
+    box-shadow: 0 0 0 2px var(--err-dim);
+  }
+  .saved__actions {
+    display: flex; gap: 10px; margin-top: 10px;
+  }
+  .saved__actions .btn { margin-top: 0; }
 
   /* ── Tabs ── */
   .tabs {
@@ -234,6 +257,10 @@
     color: var(--text);
     background: var(--bg-secondary);
   }
+  :is(button, input):focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
 
   /* ── Hints & Status ── */
   .hint {
@@ -307,6 +334,15 @@
       transition-duration: 0.01ms !important;
     }
   }
+
+  /* ── Narrow screens (roadmap W4: 320 px) ── */
+  @media (max-width: 360px) {
+    body { padding-left: 12px; padding-right: 12px; }
+    .card { padding: 20px 16px; }
+    .brand__title { font-size: 24px; }
+    input#code { font-size: 22px; }
+    .saved__actions { flex-direction: column; }
+  }
 </style>
 </head>
 <body>
@@ -314,60 +350,65 @@
   <div class="brand">
     <div class="brand__logo">DSH</div>
     <h1 class="brand__title">DSH 连接器</h1>
-    <p class="brand__sub">连接你的 DeepSeek Harness 主机</p>
+    <p class="brand__sub" data-i18n="brandSub">连接你的 DeepSeek Harness 主机</p>
+    <button id="langBtn" class="lang" type="button" data-testid="lang-toggle" aria-label="切换语言 / Switch language">EN</button>
   </div>
 
-  <section id="savedCard" class="card hidden">
-    <div class="saved__host" id="savedHost"></div>
-    <div class="saved__meta">已保存的主机</div>
-    <button id="continueBtn" class="btn btn--primary">
+  <section id="savedCard" class="card hidden" data-testid="saved-card">
+    <div class="saved__host" id="savedHost" data-testid="saved-host"></div>
+    <div class="saved__meta" id="savedMeta" data-i18n="savedMeta">已保存的主机</div>
+    <button id="continueBtn" class="btn btn--primary" data-testid="continue-btn">
       <span class="spinner"></span>
-      <span class="btn__text">继续连接</span>
+      <span class="btn__text" data-i18n="continue">继续连接</span>
     </button>
-    <button id="changeBtn" class="btn btn--ghost">更换主机</button>
+    <div class="saved__actions">
+      <button id="logoutBtn" class="btn btn--ghost" type="button" data-testid="logout-btn" data-i18n="logout">退出当前设备</button>
+      <button id="forgetBtn" class="btn btn--ghost" type="button" data-testid="forget-btn" data-i18n="forget">忘记此主机</button>
+    </div>
+    <button id="changeBtn" class="btn btn--ghost" data-testid="change-btn" data-i18n="changeHost">更换主机</button>
   </section>
 
-  <div id="picker" class="card">
-    <div class="tabs">
+  <div id="picker" class="card" data-testid="picker">
+    <div class="tabs" role="tablist">
       <div class="tabs__track" id="tabTrack"></div>
-      <button id="tabPair" class="active" type="button">配对码连接</button>
-      <button id="tabToken" type="button">令牌连接</button>
+      <button id="tabPair" class="active" type="button" role="tab" aria-selected="true" aria-controls="pairForm" data-testid="tab-pair" data-i18n="tabPair">配对码连接</button>
+      <button id="tabToken" type="button" role="tab" aria-selected="false" aria-controls="tokenForm" data-testid="tab-token" data-i18n="tabToken">令牌连接</button>
     </div>
 
     <form id="pairForm">
-      <div id="webHostLine" class="web-host hidden">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-        <span id="webHostText"></span>
+      <div id="webHostLine" class="web-host hidden" data-testid="web-host-line">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        <span id="webHostText" data-testid="web-host-text"></span>
       </div>
-      <label for="pairServer" class="server-field">主机地址</label>
+      <label for="pairServer" class="server-field" data-i18n="hostAddress">主机地址</label>
       <input id="pairServer" class="server-field" inputmode="url" autocapitalize="off" autocorrect="off"
-             placeholder="例如 192.168.1.10:3081" />
-      <label for="code">配对码</label>
+             placeholder="例如 192.168.1.10:3081" data-testid="pair-server" />
+      <label for="code" data-i18n="pairCode">配对码</label>
       <input id="code" inputmode="numeric" maxlength="6" autocomplete="one-time-code"
-             placeholder="000000" />
-      <p class="hint">主机启动 dsh-remote 时会打印一个 6 位配对码（单次使用、10 分钟有效）</p>
-      <button id="pairBtn" type="submit" class="btn btn--primary">
+             placeholder="000000" data-testid="pair-code" aria-describedby="pairHint" />
+      <p class="hint" id="pairHint" data-i18n="pairHint">主机启动 dsh-remote 时会打印一个 6 位配对码（单次使用、10 分钟有效）</p>
+      <button id="pairBtn" type="submit" class="btn btn--primary" data-testid="pair-btn">
         <span class="spinner"></span>
-        <span class="btn__text">配对并连接</span>
+        <span class="btn__text" data-i18n="pairAndConnect">配对并连接</span>
       </button>
     </form>
 
     <form id="tokenForm" class="hidden">
-      <label for="server" class="server-field">主机地址</label>
+      <label for="server" class="server-field" data-i18n="hostAddress2">主机地址</label>
       <input id="server" class="server-field" inputmode="url" autocapitalize="off" autocorrect="off"
-             placeholder="例如 192.168.1.10:3081" />
-      <label for="token">访问令牌（token）</label>
+             placeholder="例如 192.168.1.10:3081" data-testid="server" />
+      <label for="token" data-i18n="tokenLabel">访问令牌（token）</label>
       <input id="token" type="password" autocapitalize="off" autocorrect="off"
-             placeholder="dsh-remote 代理上配置的令牌" />
-      <button id="connectBtn" type="submit" class="btn btn--primary">
+             placeholder="dsh-remote 代理上配置的令牌" data-testid="token" />
+      <button id="connectBtn" type="submit" class="btn btn--primary" data-testid="connect-btn">
         <span class="spinner"></span>
-        <span class="btn__text">连接</span>
+        <span class="btn__text" data-i18n="connect">连接</span>
       </button>
     </form>
 
-    <p id="status" class="status" role="status">
-      <span class="status__dot"></span>
-      <span id="statusText"></span>
+    <p id="status" class="status" role="status" aria-live="polite" data-testid="status">
+      <span class="status__dot" aria-hidden="true"></span>
+      <span id="statusText" data-testid="status-text"></span>
     </p>
   </div>
 </main>
@@ -375,6 +416,7 @@
 <script>
 const $ = (id) => document.getElementById(id)
 const STORE_KEY = 'dsh.connection'
+const LANG_KEY = 'dsh.lang'
 const FRAGMENT = new URLSearchParams(location.hash.slice(1))
 const QR_PAIR_CODE = FRAGMENT.get('pair')
 const APP_SESSION_TOKEN = FRAGMENT.get('dsh-session')
@@ -387,6 +429,122 @@ if (QR_PAIR_CODE !== null || APP_SESSION_TOKEN !== null || location.search !== C
   history.replaceState(null, '', location.pathname + CLEAN_SEARCH)
 }
 
+/* ── i18n (roadmap W4): zh default, browser-negotiated, manual toggle ── */
+const I18N = {
+  zh: {
+    brandSub: '连接你的 DeepSeek Harness 主机',
+    savedMeta: '已保存的主机',
+    savedExpired: '会话已过期，请重新配对',
+    continue: '继续连接',
+    logout: '退出当前设备',
+    forget: '忘记此主机',
+    changeHost: '更换主机',
+    tabPair: '配对码连接',
+    tabToken: '令牌连接',
+    hostAddress: '主机地址',
+    hostAddress2: '主机地址',
+    pairCode: '配对码',
+    pairHint: '主机启动 dsh-remote 时会打印一个 6 位配对码（单次使用、10 分钟有效）',
+    pairAndConnect: '配对并连接',
+    tokenLabel: '访问令牌（token）',
+    connect: '连接',
+    currentHost: '当前主机：',
+    title: 'DSH — 连接主机',
+    needHost: '请填写主机地址',
+    badHost: '主机地址无效',
+    confirmLabel: '确认配对并连接',
+    qrPrefilled: '已从二维码填入配对码，请确认连接',
+    qrInvalid: '二维码中的配对码无效，请重新扫描',
+    establishing: '正在建立安全会话…',
+    sessionDead: '设备会话已失效，请重新配对',
+    connected: '已连接，正在进入…',
+    paired: '已配对，正在进入…',
+    checkingHost: '正在检查主机…',
+    redeeming: '正在兑换配对码…',
+    hostTimeout: '连不上主机：超时，请确认主机与手机在同一局域网',
+    badToken: '访问令牌无效',
+    tooMany: '尝试过多，请稍后再试',
+    badCode: '配对码无效或已过期',
+    badResponse: '主机响应异常',
+    needCode: '配对码是 6 位数字',
+    needToken: '请填写访问令牌',
+    upstreamDown: '代理在线，但上游 dsh web 未运行；请先在主机上启动 dsh web',
+    loggedOut: '已退出当前设备，请重新配对',
+    forgot: '已忘记此主机，请重新配对',
+  },
+  en: {
+    brandSub: 'Connect to your DeepSeek Harness host',
+    savedMeta: 'Saved host',
+    savedExpired: 'Session expired — pair again',
+    continue: 'Continue',
+    logout: 'Sign out this device',
+    forget: 'Forget this host',
+    changeHost: 'Change host',
+    tabPair: 'Pairing code',
+    tabToken: 'Access token',
+    hostAddress: 'Host address',
+    hostAddress2: 'Host address',
+    pairCode: 'Pairing code',
+    pairHint: 'Starting dsh-remote on the host prints a 6-digit code (single use, 10 minutes)',
+    pairAndConnect: 'Pair & connect',
+    tokenLabel: 'Access token',
+    connect: 'Connect',
+    currentHost: 'Current host: ',
+    title: 'DSH — Connect to host',
+    needHost: 'Enter the host address',
+    badHost: 'Invalid host address',
+    confirmLabel: 'Confirm pairing & connect',
+    qrPrefilled: 'Pairing code filled from QR — confirm to connect',
+    qrInvalid: 'Invalid pairing code in QR — scan again',
+    establishing: 'Establishing secure session…',
+    sessionDead: 'Device session expired — pair again',
+    connected: 'Connected, entering…',
+    paired: 'Paired, entering…',
+    checkingHost: 'Checking host…',
+    redeeming: 'Redeeming pairing code…',
+    hostTimeout: 'Cannot reach the host: timed out. Check that phone and computer share the LAN',
+    badToken: 'Invalid access token',
+    tooMany: 'Too many attempts — try again later',
+    badCode: 'Pairing code invalid or expired',
+    badResponse: 'Unexpected host response',
+    needCode: 'The pairing code is 6 digits',
+    needToken: 'Enter the access token',
+    upstreamDown: 'Proxy is up, but upstream dsh web is not running; start dsh web on the host first',
+    loggedOut: 'Signed out — pair again',
+    forgot: 'Host forgotten — pair again',
+  },
+}
+let LANG = 'zh'
+try {
+  const stored = typeof localStorage !== 'undefined' ? localStorage.getItem(LANG_KEY) : null
+  const browser = typeof navigator !== 'undefined' && navigator.language ? navigator.language.toLowerCase() : ''
+  LANG = stored === 'en' || stored === 'zh'
+    ? stored
+    : (browser.startsWith('zh') ? 'zh' : stored ? 'en' : 'zh')
+  if (!stored && browser && !browser.startsWith('zh')) LANG = 'en'
+} catch { LANG = 'zh' }
+const t = (key) => (I18N[LANG] ?? I18N.zh)[key] ?? I18N.zh[key] ?? key
+
+function applyLanguage() {
+  document.documentElement.lang = LANG === 'zh' ? 'zh-CN' : 'en'
+  document.title = t('title')
+  for (const el of document.querySelectorAll('[data-i18n]')) {
+    el.textContent = t(el.getAttribute('data-i18n'))
+  }
+  $('pairServer').placeholder = LANG === 'zh' ? '例如 192.168.1.10:3081' : 'e.g. 192.168.1.10:3081'
+  $('server').placeholder = $('pairServer').placeholder
+  $('token').placeholder = LANG === 'zh' ? 'dsh-remote 代理上配置的令牌' : 'the token configured on dsh-remote'
+  const langBtn = $('langBtn')
+  if (langBtn) langBtn.textContent = LANG === 'zh' ? 'EN' : '中文'
+}
+$('langBtn').onclick = () => {
+  LANG = LANG === 'zh' ? 'en' : 'zh'
+  try { localStorage.setItem(LANG_KEY, LANG) } catch {}
+  applyLanguage()
+  updateTabTrack()
+  say(lastStatusKind, lastStatusTextKey ? t(lastStatusTextKey) : '')
+}
+
 /* ── Carrier detection ── */
 const IS_APP = typeof window.Capacitor !== 'undefined'
 if (!IS_APP) {
@@ -394,7 +552,7 @@ if (!IS_APP) {
   $('pairServer').value = location.origin + '/'
   $('server').value = location.origin + '/'
   $('webHostLine').classList.remove('hidden')
-  $('webHostText').textContent = '当前主机：' + location.host
+  $('webHostText').textContent = t('currentHost') + location.host
 }
 
 /* ── Tab track animation ── */
@@ -413,11 +571,11 @@ function updateTabTrack() {
 
 function normalize(input) {
   const raw = (input || '').trim()
-  if (!raw) throw new Error('请填写主机地址')
+  if (!raw) throw new Error(t('needHost'))
   const hasScheme = /^https?:\/\//i.test(raw)
   const s = hasScheme ? raw : 'http://' + raw
   const url = new URL(s)
-  if (!url.hostname) throw new Error('主机地址无效')
+  if (!url.hostname) throw new Error(t('badHost'))
   if (!hasScheme && !url.port) url.port = '3081'
   url.pathname = '/'
   url.search = ''
@@ -433,6 +591,9 @@ function save(base, token) {
   if (IS_APP && token) connection.token = token
   localStorage.setItem(STORE_KEY, JSON.stringify(connection))
 }
+function forget() {
+  localStorage.removeItem(STORE_KEY)
+}
 
 async function healthcheck(base) {
   const ctl = new AbortController()
@@ -440,6 +601,8 @@ async function healthcheck(base) {
   try {
     const res = await fetch(base + 'healthz', { signal: ctl.signal, cache: 'no-store' })
     if (!res.ok) throw new Error('HTTP ' + res.status)
+    const body = await res.json()
+    if (body && body.upstream === false) throw new Error('upstream-down')
   } finally { clearTimeout(timer) }
 }
 
@@ -449,22 +612,44 @@ function setBusy(busy) {
     if (btn) btn.disabled = busy
   }
 }
-function say(kind, text) {
+let lastStatusKind = ''
+let lastStatusTextKey = ''
+function say(kind, textOrKey) {
+  lastStatusKind = kind
+  lastStatusTextKey = I18N[LANG] && I18N[LANG][textOrKey] ? textOrKey : ''
   const el = $('status')
   const txt = $('statusText')
-  el.className = 'status' + (kind ? ' ' + kind : '') + (text ? ' visible' : '')
-  txt.textContent = text
+  el.className = 'status' + (kind ? ' ' + kind : '') + (textOrKey ? ' visible' : '')
+  txt.textContent = lastStatusTextKey ? t(lastStatusTextKey) : textOrKey
 }
 function fail(e) {
   const msg = e && e.name === 'AbortError'
-    ? '连不上主机：超时，请确认主机与手机在同一局域网'
-    : String(e.message || e)
+    ? t('hostTimeout')
+    : e && e.message === 'upstream-down'
+      ? t('upstreamDown')
+      : String(e.message || e)
   say('err', msg)
+}
+
+function showPicker(message) {
+  $('savedCard').classList.add('hidden')
+  $('picker').classList.remove('hidden')
+  if (message) say('err', message)
+  requestAnimationFrame(() => {
+    updateTabTrack()
+    $(IS_APP ? 'pairServer' : 'code').focus()
+  })
+}
+
+async function endDeviceSession() {
+  try {
+    await fetch((IS_APP && typeof saved !== 'undefined' && saved ? saved.base : '') + 'device/logout', { method: 'POST' })
+  } catch {}
 }
 
 function enterWithAppToken(base, token) {
   save(base, token)
-  say('ok', '已连接，正在进入…')
+  say('ok', 'connected')
   location.assign(base + '#dsh-session=' + encodeURIComponent(token))
 }
 
@@ -474,14 +659,14 @@ async function establishWebSession(base, token) {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ token }),
   })
-  if (!res.ok) throw new Error('访问令牌无效')
+  if (!res.ok) throw new Error(t('badToken'))
   save(base)
-  say('ok', '已连接，正在进入…')
+  say('ok', 'connected')
   location.assign(base)
 }
 
 async function connectWithToken(base, token) {
-  say('', '正在检查主机…'); setBusy(true)
+  say('', 'checkingHost'); setBusy(true)
   try {
     await healthcheck(base)
     if (IS_APP) enterWithAppToken(base, token)
@@ -490,7 +675,7 @@ async function connectWithToken(base, token) {
 }
 
 async function connectWithCode(base, code) {
-  say('', '正在兑换配对码…'); setBusy(true)
+  say('', 'redeeming'); setBusy(true)
   try {
     await healthcheck(base)
     const ctl = new AbortController()
@@ -507,15 +692,15 @@ async function connectWithCode(base, code) {
         signal: ctl.signal,
       })
     } finally { clearTimeout(timer) }
-    if (res.status === 429) throw new Error('尝试过多，请稍后再试')
-    if (!res.ok) throw new Error('配对码无效或已过期')
+    if (res.status === 429) throw new Error(t('tooMany'))
+    if (!res.ok) throw new Error(t('badCode'))
     const data = await res.json()
     if (IS_APP) {
-      if (!data.token) throw new Error('主机响应异常')
+      if (!data.token) throw new Error(t('badResponse'))
       enterWithAppToken(base, data.token)
     } else {
       save(base)
-      say('ok', '已配对，正在进入…')
+      say('ok', 'paired')
       location.assign(base)
     }
   } catch (e) { fail(e) } finally { setBusy(false) }
@@ -542,32 +727,71 @@ if (saved && saved.base && QR_PAIR_CODE === null && APP_SESSION_TOKEN === null) 
       $('server').focus()
     })
   }
-}
-
-/* ── QR prefill ── */
-if (QR_PAIR_CODE !== null) {
-  $('savedCard').classList.add('hidden')
-  $('picker').classList.remove('hidden')
-  if (/^\d{6}$/.test(QR_PAIR_CODE)) {
-    $('code').value = QR_PAIR_CODE
-    const btn = $('pairBtn')
-    btn.querySelector('.btn__text').textContent = '确认配对并连接'
-    say('ok', '已从二维码填入配对码，请确认连接')
-    requestAnimationFrame(() => btn.focus())
-  } else {
-    say('err', '二维码中的配对码无效，请重新扫描')
+  /* Device lifecycle (roadmap W2): sign out revokes this device server-side;
+   * forgetting also drops the saved host. Both land on a clean pairing page. */
+  $('logoutBtn').onclick = async () => {
+    setBusy(true)
+    await endDeviceSession()
+    setBusy(false)
+    forget()
+    showPicker('loggedOut')
+  }
+  $('forgetBtn').onclick = async () => {
+    setBusy(true)
+    await endDeviceSession()
+    setBusy(false)
+    forget()
+    showPicker('forgot')
+  }
+  /* Web mode: detect an expired device session up front so "continue" never
+   * bounces the user into a bare 401 (roadmap W3 error differentiation). */
+  if (!IS_APP) {
+    fetch('session/check', { cache: 'no-store' }).then(async (res) => {
+      if (res.ok) return
+      const meta = $('savedMeta')
+      meta.textContent = t('savedExpired')
+      meta.classList.add('expired')
+      $('continueBtn').classList.add('hidden')
+    }).catch(() => {})
   }
 }
 
+/* ── QR prefill ── */
+function applyPairPrefill(rawCode) {
+  $('savedCard').classList.add('hidden')
+  $('picker').classList.remove('hidden')
+  if (/^\d{6}$/.test(rawCode)) {
+    $('code').value = rawCode
+    const btn = $('pairBtn')
+    const label = btn.querySelector('.btn__text')
+    label.textContent = t('confirmLabel')
+    // Keep the confirmation label from being reset by applyLanguage().
+    if (typeof label.removeAttribute === 'function') label.removeAttribute('data-i18n')
+    say('ok', 'qrPrefilled')
+    requestAnimationFrame(() => btn.focus())
+  } else {
+    say('err', 'qrInvalid')
+  }
+}
+if (QR_PAIR_CODE !== null) applyPairPrefill(QR_PAIR_CODE)
+/* Re-scanning a fresh QR while the launcher is already open only changes the
+ * hash — no reload — so react to hashchange as well. */
+window.addEventListener('hashchange', () => {
+  const code = new URLSearchParams(location.hash.slice(1)).get('pair')
+  if (code === null) return
+  history.replaceState(null, '', location.pathname + CLEAN_SEARCH)
+  applyPairPrefill(code)
+})
+
 /* ── App session handoff ── */
 if (APP_SESSION_TOKEN) {
-  say('', '正在建立安全会话…')
+  say('', 'establishing')
   fetch(location.origin + '/session', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ token: APP_SESSION_TOKEN }),
   }).then((res) => {
-    if (!res.ok) throw new Error('设备会话已失效，请重新配对')
+    if (!res.ok) throw new Error(t('sessionDead'))
     location.replace(location.origin + '/')
   }).catch(fail)
 }
@@ -575,12 +799,14 @@ if (APP_SESSION_TOKEN) {
 /* ── Mode tabs ── */
 tabPair.onclick = () => {
   tabPair.classList.add('active'); tabToken.classList.remove('active')
+  tabPair.setAttribute('aria-selected', 'true'); tabToken.setAttribute('aria-selected', 'false')
   $('pairForm').classList.remove('hidden'); $('tokenForm').classList.add('hidden')
   updateTabTrack()
   $(IS_APP ? 'pairServer' : 'code').focus()
 }
 tabToken.onclick = () => {
   tabToken.classList.add('active'); tabPair.classList.remove('active')
+  tabToken.setAttribute('aria-selected', 'true'); tabPair.setAttribute('aria-selected', 'false')
   $('tokenForm').classList.remove('hidden'); $('pairForm').classList.add('hidden')
   updateTabTrack()
   $(IS_APP ? 'server' : 'token').focus()
@@ -592,7 +818,7 @@ $('pairForm').onsubmit = (e) => {
   let url
   try { url = normalize(IS_APP ? $('pairServer').value : location.origin) } catch (err) { say('err', err.message); return }
   const code = $('code').value.trim()
-  if (!/^\d{6}$/.test(code)) { say('err', '配对码是 6 位数字'); return }
+  if (!/^\d{6}$/.test(code)) { say('err', 'needCode'); return }
   connectWithCode(url.origin + '/', code)
 }
 $('tokenForm').onsubmit = (e) => {
@@ -600,14 +826,16 @@ $('tokenForm').onsubmit = (e) => {
   let url
   try { url = normalize(IS_APP ? $('server').value : location.origin) } catch (err) { say('err', err.message); return }
   const token = $('token').value.trim()
-  if (!token) { say('err', '请填写访问令牌'); return }
+  if (!token) { say('err', 'needToken'); return }
   connectWithToken(url.origin + '/', token)
 }
 
 /* ── Auto-focus & tab track init ── */
 window.addEventListener('DOMContentLoaded', () => {
+  applyLanguage()
+  if (!IS_APP) $('webHostText').textContent = t('currentHost') + location.host
   updateTabTrack()
-  if ($('savedCard').classList.contains('hidden')) {
+  if (QR_PAIR_CODE === null && $('savedCard').classList.contains('hidden')) {
     const pairMode = !$('pairForm').classList.contains('hidden')
     const firstInput = $(IS_APP
       ? (pairMode ? 'pairServer' : 'server')

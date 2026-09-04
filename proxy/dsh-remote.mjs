@@ -30,6 +30,19 @@
  *     local QR code are printed at startup. The QR fragment carries only the
  *     short-lived single-use code, never a master/device credential.
  *
+ * Device lifecycle (roadmap W2): every issued device session is registered in
+ * a versioned state file (`DSH_STATE_FILE`, default `dsh-devices.json` next to
+ * this file; mode 0600, atomic replace, corrupt file fails closed at boot).
+ * Token validation additionally checks registration and revocation, so a
+ * device can be revoked individually:
+ *   - `GET /session/check` — is the current cookie/bearer still valid? Also
+ *     powers the launcher's "session expired" state.
+ *   - `POST /device/logout` — revokes the presenting device and clears the
+ *     cookie; idempotent. With a master credential it only clears the cookie.
+ *   - `GET /devices` and `POST /devices/revoke {id}` — master-token only
+ *     management surface backing the `/admin` page. Rotating
+ *     `DSH_REMOTE_TOKEN` still invalidates every device at once (HMAC key).
+ *
  * `GET /healthz` answers 200 without auth (with `Access-Control-Allow-
  * Origin: *`) so the app launcher can precheck reachability from its own
  * origin; it exposes nothing beyond "the proxy is up".
@@ -68,13 +81,25 @@
  *   DSH_LAUNCHER      (optional) launcher HTML path, or "off"
  *   DSH_PUBLIC_URL    (optional) public proxy origin used in pairing links
  *   DSH_PAIR_QR       default on in a TTY; set "off" to hide terminal QR
+ *   DSH_STATE_FILE    (optional) device registry path; corrupt file → refuse
+ *                     to start (fail closed); deleting it revokes all devices
  */
 import http from 'node:http'
 import https from 'node:https'
 import crypto from 'node:crypto'
 import fs from 'node:fs'
+import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { discoverPublicBases, pairingUrls, renderTerminalQr } from './pairing-qr.mjs'
+import { discoverPublicBases, pairingUrls, renderTerminalQr, renderSvgQr } from './pairing-qr.mjs'
+import {
+  deviceActive,
+  loadState,
+  pruneExpired,
+  publicView,
+  registerDevice,
+  revokeDevice,
+  saveState,
+} from './device-store.mjs'
 
 const TOKEN = process.env.DSH_REMOTE_TOKEN
 if (!TOKEN || TOKEN.length < 8) {
@@ -146,6 +171,7 @@ const RANDOM_UUID_POLYFILL = `<script ${RANDOM_UUID_POLYFILL_MARKER}>
 // app/www/index.html (missing → off, with a boot note) → DSH_LAUNCHER=off.
 const LAUNCHER_ENV = process.env.DSH_LAUNCHER
 let LAUNCHER_HTML
+let ADMIN_HTML
 if (LAUNCHER_ENV !== 'off') {
   const launcherPath = LAUNCHER_ENV ?? fileURLToPath(new URL('../app/www/index.html', import.meta.url))
   try {
@@ -158,7 +184,59 @@ if (LAUNCHER_ENV !== 'off') {
     }
     console.log('dsh-remote: web mode off — no launcher page found next to the repo layout')
   }
+  if (LAUNCHER_HTML) {
+    // Admin console ships beside the launcher and inherits its availability;
+    // the page itself carries no secrets (the master token is entered per use
+    // and kept in memory only).
+    const adminPath = path.join(path.dirname(launcherPath), 'admin.html')
+    try {
+      ADMIN_HTML = fs.readFileSync(adminPath)
+      console.log(`dsh-remote: admin console ${adminPath}`)
+    } catch {
+      console.log('dsh-remote: admin console unavailable (admin.html not found next to the launcher)')
+    }
+  }
 }
+
+// ── device registry (roadmap W2) ─────────────────────────────────────────
+const STATE_PATH = process.env.DSH_STATE_FILE
+  ?? fileURLToPath(new URL('./dsh-devices.json', import.meta.url))
+let STATE
+try {
+  STATE = loadState(STATE_PATH)
+} catch (error) {
+  console.error(`dsh-remote: ${error.message}`)
+  process.exit(1)
+}
+{
+  const active = STATE.devices.filter((device) => device.revokedAt === null && device.expiresAt > Date.now())
+  console.log(`dsh-remote: device registry ${STATE_PATH} (${active.length} active / ${STATE.devices.length} recorded)`)
+}
+
+/** Last-seen timestamps are informational; persist at most this often. */
+const LAST_SEEN_INTERVAL_MS = 60 * 1000
+const lastSeenDirty = new Map()
+
+function touchDevice(id) {
+  const record = STATE.devices.find((device) => device.id === id)
+  if (!record) return
+  const now = Date.now()
+  if (record.lastSeenAt !== null && now - record.lastSeenAt < LAST_SEEN_INTERVAL_MS) return
+  record.lastSeenAt = now
+  lastSeenDirty.set(id, now)
+}
+
+// Flush last-seen updates on a timer instead of per request; a burst of
+// requests must not turn into a burst of fsyncs.
+setInterval(() => {
+  if (lastSeenDirty.size === 0) return
+  lastSeenDirty.clear()
+  try {
+    saveState(STATE_PATH, STATE)
+  } catch (error) {
+    console.error(`dsh-remote: could not persist device registry: ${error.message}`)
+  }
+}, LAST_SEEN_INTERVAL_MS).unref()
 
 /** Constant-time token comparison; length-mismatched candidates fail fast. */
 function tokenOk(candidate) {
@@ -173,15 +251,26 @@ function tokenOk(candidate) {
  * same request access as the master token, but cannot mint pairing codes and
  * rotating DSH_REMOTE_TOKEN invalidates every issued device token.
  */
-function mintDeviceToken() {
-  const payload = Buffer.from(JSON.stringify({
-    id: crypto.randomUUID(),
-    exp: Date.now() + DEVICE_TOKEN_TTL_MS,
-  })).toString('base64url')
+function mintDeviceToken(name) {
+  const id = crypto.randomUUID()
+  const issuedAt = Date.now()
+  const expiresAt = issuedAt + DEVICE_TOKEN_TTL_MS
+  const payload = Buffer.from(JSON.stringify({ id, exp: expiresAt })).toString('base64url')
   const signature = crypto.createHmac('sha256', TOKEN).update(payload).digest('base64url')
+  try {
+    pruneExpired(STATE)
+    registerDevice(STATE, STATE_PATH, { id, name, issuedAt, expiresAt })
+  } catch (error) {
+    console.error(`dsh-remote: could not persist device registry: ${error.message}`)
+    return undefined
+  }
   return `${DEVICE_TOKEN_PREFIX}.${payload}.${signature}`
 }
 
+/**
+ * HMAC + expiry first (cheap, no I/O), then the registry: an unregistered or
+ * revoked device id fails closed even with a valid signature.
+ */
 function deviceTokenOk(candidate) {
   if (typeof candidate !== 'string') return false
   const [prefix, payload, signature, extra] = candidate.split('.')
@@ -194,25 +283,54 @@ function deviceTokenOk(candidate) {
   const actualBytes = Buffer.from(signature)
   if (actualBytes.length !== expectedBytes.length
       || !crypto.timingSafeEqual(actualBytes, expectedBytes)) return false
+  let claims
   try {
-    const claims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'))
-    return typeof claims.id === 'string'
-      && claims.id.length > 0
-      && Number.isSafeInteger(claims.exp)
-      && claims.exp > Date.now()
+    claims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'))
   } catch {
     return false
   }
+  if (typeof claims.id !== 'string'
+      || claims.id.length === 0
+      || !Number.isSafeInteger(claims.exp)
+      || claims.exp <= Date.now()) return false
+  if (!deviceActive(STATE, claims.id)) return false
+  touchDevice(claims.id)
+  return true
 }
 
 function accessTokenOk(candidate) {
   return tokenOk(candidate) || deviceTokenOk(candidate)
 }
 
+/** Validated claims of a device token (HMAC + expiry only, no registry I/O). */
+function deviceClaims(candidate) {
+  if (typeof candidate !== 'string') return undefined
+  const [prefix, payload, signature, extra] = candidate.split('.')
+  if (prefix !== DEVICE_TOKEN_PREFIX || !payload || !signature || extra !== undefined) return undefined
+  const expected = crypto.createHmac('sha256', TOKEN).update(payload).digest('base64url')
+  const expectedBytes = Buffer.from(expected)
+  const actualBytes = Buffer.from(signature)
+  if (actualBytes.length !== expectedBytes.length
+      || !crypto.timingSafeEqual(actualBytes, expectedBytes)) return undefined
+  try {
+    const claims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'))
+    return typeof claims.id === 'string' && claims.id.length > 0 ? claims : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** Revoke the registry record; idempotent. */
+function revokeById(id) {
+  return revokeDevice(STATE, STATE_PATH, id)
+}
+
 // ── pairing codes (ADR-0006) ─────────────────────────────────────────────
 const PAIR_CODE_TTL_MS = 10 * 60 * 1000
 const PAIR_RATE_WINDOW_MS = 60 * 1000
-const PAIR_RATE_MAX = 10
+// Deployment knob: burst budget for pairing attempts per source IP per minute.
+// The default is deliberately tight; test harnesses raise it.
+const PAIR_RATE_MAX = Math.max(1, Number(process.env.DSH_PAIR_RATE_MAX ?? 10))
 /** @type {Map<string, number>} code → expiry epoch ms */
 const pairCodes = new Map()
 /** @type {Map<string, {count: number, resetAt: number}>} source IP → attempts */
@@ -432,6 +550,31 @@ function json(res, code, body, extraHeaders = {}) {
   res.end(JSON.stringify(body))
 }
 
+// ── upstream health (roadmap W3): probed lazily, cached 5 s ─────────────
+let upstreamHealthCache = { at: 0, ok: false, error: 'not probed yet' }
+function upstreamHealth() {
+  return new Promise((resolve) => {
+    const now = Date.now()
+    if (now - upstreamHealthCache.at < 5000) {
+      resolve(upstreamHealthCache)
+      return
+    }
+    const req = http.request({ host: TARGET_HOST, port: TARGET_PORT, path: '/', method: 'GET', timeout: 2000 }, (res) => {
+      res.resume()
+      upstreamHealthCache = { at: now, ok: res.statusCode !== undefined && res.statusCode < 500, error: res.statusCode !== undefined && res.statusCode < 500 ? '' : `upstream HTTP ${res.statusCode}` }
+      resolve(upstreamHealthCache)
+    })
+    req.on('timeout', () => {
+      req.destroy()
+    })
+    req.on('error', (error) => {
+      upstreamHealthCache = { at: now, ok: false, error: error.message }
+      resolve(upstreamHealthCache)
+    })
+    req.end()
+  })
+}
+
 const BODY_TOO_LARGE = Symbol('body-too-large')
 
 /** Read a small JSON body (≤64 KiB); resolves undefined on malformed input. */
@@ -521,12 +664,13 @@ async function handle(req, res) {
   }
 
   if (url.pathname === '/healthz') {
+    const upstream = await upstreamHealth()
     res.writeHead(200, {
       'content-type': 'application/json',
       'access-control-allow-origin': '*',
       'cache-control': 'no-store',
     })
-    res.end('{"ok":true}')
+    res.end(JSON.stringify({ ok: true, upstream: upstream.ok, upstreamError: upstream.ok ? undefined : upstream.error }))
     return
   }
 
@@ -539,6 +683,18 @@ async function handle(req, res) {
     }
     res.writeHead(200, LAUNCHER_HEADERS)
     res.end(LAUNCHER_HTML)
+    return
+  }
+
+  // Admin console (roadmap W3): static page, no secrets; it authenticates
+  // per action with the master token held in memory only.
+  if (url.pathname === '/admin' && req.method === 'GET') {
+    if (!ADMIN_HTML) {
+      reject(res, 404, '管理页未启用')
+      return
+    }
+    res.writeHead(200, LAUNCHER_HEADERS)
+    res.end(ADMIN_HTML)
     return
   }
 
@@ -564,7 +720,11 @@ async function handle(req, res) {
       json(res, 403, { error: 'invalid_or_expired_code' }, CORS_HEADERS)
       return
     }
-    const deviceToken = mintDeviceToken()
+    const deviceToken = mintDeviceToken(typeof body?.name === 'string' ? body.name : undefined)
+    if (deviceToken === undefined) {
+      json(res, 503, { error: 'device_registry_unavailable' }, CORS_HEADERS)
+      return
+    }
     const headers = { ...CORS_HEADERS, 'set-cookie': sessionCookie(deviceToken) }
     if (req.headers['x-dsh-client'] === 'app') {
       json(res, 200, { token: deviceToken, expiresInSeconds: DEVICE_TOKEN_TTL_MS / 1000 }, headers)
@@ -608,15 +768,139 @@ async function handle(req, res) {
       json(res, 401, { error: 'unauthorized' }, CORS_HEADERS)
       return
     }
-    const sessionToken = tokenOk(credential) ? mintDeviceToken() : credential
+    let sessionToken
+    if (tokenOk(credential)) {
+      sessionToken = mintDeviceToken(typeof body?.name === 'string' ? body.name : undefined)
+      if (sessionToken === undefined) {
+        json(res, 503, { error: 'device_registry_unavailable' }, CORS_HEADERS)
+        return
+      }
+    } else {
+      sessionToken = credential
+    }
     json(res, 200, { ok: true }, { ...CORS_HEADERS, 'set-cookie': sessionCookie(sessionToken) })
+    return
+  }
+
+  // ── device lifecycle (roadmap W2) ────────────────────────────────────
+  if (url.pathname === '/session/check' && req.method === 'GET') {
+    const cookieToken = readCookie(req, COOKIE_NAME)
+    const bearer = bearerToken(req)
+    const credential = tokenOk(cookieToken) || tokenOk(bearer)
+      ? { master: true }
+      : deviceClaims(cookieToken) && deviceActive(STATE, deviceClaims(cookieToken).id)
+        ? { id: deviceClaims(cookieToken).id }
+        : deviceClaims(bearer) && deviceActive(STATE, deviceClaims(bearer).id)
+          ? { id: deviceClaims(bearer).id }
+          : undefined
+    if (!credential) {
+      json(res, 401, { authenticated: false, reason: 'session_invalid' })
+      return
+    }
+    const record = credential.master
+      ? undefined
+      : STATE.devices.find((device) => device.id === credential.id)
+    json(res, 200, {
+      authenticated: true,
+      master: credential.master === true,
+      deviceId: record?.id,
+      deviceName: record?.name,
+      expiresAt: record?.expiresAt,
+    })
+    return
+  }
+  if (url.pathname === '/device/logout' && req.method === 'POST') {
+    if (!requestOriginOk(req)) {
+      json(res, 403, { error: 'origin_forbidden' }, CORS_HEADERS)
+      return
+    }
+    // Idempotent: revoking an already-invalid/unknown session still succeeds
+    // and always clears the cookie, so "logout" never dead-ends the browser.
+    const credential = readCookie(req, COOKIE_NAME)
+    const claims = deviceClaims(credential) ?? deviceClaims(bearerToken(req))
+    if (claims) revokeById(claims.id)
+    json(res, 200, { ok: true }, {
+      ...CORS_HEADERS,
+      'set-cookie': `${COOKIE_NAME}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${TLS ? '; Secure' : ''}`,
+    })
+    return
+  }
+
+  // ── master-token management surface (roadmap W2/W3) ──────────────────
+  if (url.pathname === '/devices' && req.method === 'GET') {
+    if (!tokenOk(readCookie(req, COOKIE_NAME)) && !tokenOk(bearerToken(req))) {
+      json(res, 401, { error: 'unauthorized' })
+      return
+    }
+    pruneExpired(STATE)
+    const now = Date.now()
+    json(res, 200, {
+      devices: [...STATE.devices]
+        .sort((a, b) => b.issuedAt - a.issuedAt)
+        .map((device) => ({
+          ...publicView(device),
+          active: device.revokedAt === null && device.expiresAt > now,
+        })),
+    })
+    return
+  }
+  if (url.pathname === '/devices/revoke' && req.method === 'POST') {
+    if (!requestOriginOk(req)) {
+      json(res, 403, { error: 'origin_forbidden' })
+      return
+    }
+    if (!tokenOk(readCookie(req, COOKIE_NAME)) && !tokenOk(bearerToken(req))) {
+      json(res, 401, { error: 'unauthorized' })
+      return
+    }
+    const body = await readJsonBody(req)
+    if (body === BODY_TOO_LARGE) {
+      json(res, 413, { error: 'payload_too_large' })
+      return
+    }
+    const id = typeof body?.id === 'string' ? body.id : ''
+    if (!id) {
+      json(res, 400, { error: 'device_id_required' })
+      return
+    }
+    const revoked = revokeById(id)
+    json(res, 200, { ok: true, revoked })
+    return
+  }
+  if (url.pathname === '/pair/qr.svg' && req.method === 'GET') {
+    if (!tokenOk(readCookie(req, COOKIE_NAME)) && !tokenOk(bearerToken(req))) {
+      json(res, 401, { error: 'unauthorized' })
+      return
+    }
+    if (!LAUNCHER_HTML) {
+      json(res, 404, { error: 'web_mode_off' })
+      return
+    }
+    const code = mintPairCode()
+    const urls = pairingUrls(PAIRING_BASES, code)
+    announcePairingCode(code)
+    res.writeHead(200, {
+      'content-type': 'image/svg+xml; charset=utf-8',
+      'cache-control': 'no-store',
+      'content-disposition': 'inline; filename="dsh-pairing-qr.svg"',
+    })
+    res.end(renderSvgQr(urls[0]))
     return
   }
 
   const queryToken = url.searchParams.get('token')
   if (accessTokenOk(queryToken)) {
     // Login: plant the session cookie and bounce to the token-free URL.
-    const sessionToken = tokenOk(queryToken) ? mintDeviceToken() : queryToken
+    let sessionToken
+    if (tokenOk(queryToken)) {
+      sessionToken = mintDeviceToken()
+      if (sessionToken === undefined) {
+        reject(res, 503, '设备登记不可用')
+        return
+      }
+    } else {
+      sessionToken = queryToken
+    }
     res.writeHead(302, { location: stripTokenParam(url), 'set-cookie': sessionCookie(sessionToken) })
     res.end()
     return
@@ -696,10 +980,24 @@ server.requestTimeout = 0
 server.headersTimeout = 0
 server.timeout = 0
 
-server.listen(LISTEN_PORT, LISTEN_HOST, () => {
+server.listen(LISTEN_PORT, LISTEN_HOST, async () => {
   console.log(`dsh-remote: ${SCHEME}://${LISTEN_HOST}:${LISTEN_PORT} -> http://${TARGET_AUTHORITY} (token required)`)
+  console.log(`dsh-remote: TLS ${TLS ? 'on (user-supplied certificate)' : 'off — plain HTTP, trusted LAN/mesh only; do not port-forward'}`)
+  console.log(`dsh-remote: scannable pairing bases: ${PAIRING_BASES.join(', ')}`)
+  if (PAIRING_BASES.length > 1 || PAIRING_BASES[0] === undefined) {
+    console.log('dsh-remote: multiple interfaces — pick one explicitly with DSH_PUBLIC_URL if the printed links do not match your network')
+  }
+  try {
+    const upstream = await upstreamHealth()
+    console.log(upstream.ok
+      ? `dsh-remote: upstream dsh web healthy at http://${TARGET_AUTHORITY}`
+      : `dsh-remote: WARNING upstream dsh web not healthy at http://${TARGET_AUTHORITY} (${upstream.error}) — pairing will succeed but the UI will not load`)
+  } catch {
+    console.log(`dsh-remote: upstream dsh web probe failed at http://${TARGET_AUTHORITY}`)
+  }
   announcePairingCode(mintPairCode())
   if (process.stdin.isTTY) console.log('dsh-remote: enter n and press Return for a new pairing QR')
   console.log('dsh-remote: mint more with  curl -X POST -H "Authorization: Bearer $DSH_REMOTE_TOKEN" <this-url>/pair/new')
+  if (ADMIN_HTML) console.log(`dsh-remote: device admin console at ${SCHEME}://<this-host>:${LISTEN_PORT}/admin`)
   enableTerminalPairing()
 })

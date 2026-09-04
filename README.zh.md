@@ -45,6 +45,8 @@ node dist/web/start.mjs
 
 默认代理监听 `0.0.0.0:3081`，会提供 Web 启动页、一次性配对码和二维码所需的配对 URL。可用 `DSH_LISTEN_HOST`、`DSH_LISTEN_PORT`、`DSH_TARGET_HOST`、`DSH_TARGET_PORT` 覆盖地址；公网使用时还应同时配置 `DSH_TLS_CERT`、`DSH_TLS_KEY` 和可信的 `DSH_PUBLIC_URL`。明文 HTTP 只适用于可信局域网或组网网络，不要做端口转发。
 
+**设备管理**：每台配对设备都会登记进 `DSH_STATE_FILE`（默认 `proxy/dsh-devices.json`；0600 权限、原子写入，文件损坏时拒绝启动）。浏览器打开 `/admin` 并输入主令牌，即可查看设备列表（名称、签发时间、最后使用、到期）、单独吊销某台设备、签发新配对码或下载 SVG 二维码。启动页提供「退出当前设备」「忘记此主机」；会话被吊销或过期时会给出明确的重新配对引导，而不是笼统的 401。轮换 `DSH_REMOTE_TOKEN` 可一次性吊销全部设备。详见 [ADR-0010](docs/decisions/ADR-0010-device-registry-admin-i18n.md) 与[反向代理与组网部署指南](docs/12-reverse-proxy-and-networking.md)。
+
 桌面端集成示例：先在本仓库生成 `dist/web`，再在 `dsh-desktop` 中执行 `DSH_MOBILE_SHELL_WEB_ROOT=/绝对路径/dsh-mobile-shell/dist/web pnpm run build`。Electron 安装包只携带这一份 Web 产物，Android/iOS 工程仍属于本仓库的独立发布面。
 
 ## 版本号
@@ -88,7 +90,7 @@ DSH_REMOTE_TOKEN=$(openssl rand -hex 16) node proxy/dsh-remote.mjs
   - **Android**：从 [Releases](https://github.com/citrusli2026/dsh-mobile-shell/releases) 直接下载 APK 安装。
   - **iOS**：从源码构建（见下）或等待 TestFlight——苹果没有免签名的直接安装路径。
 
-> **Web 验证状态（2026-08-15）：已通过。** 已对真实发布版 `dsh web` 完成 HTTP 28/28、HTTPS/WSS 28/28 自动化矩阵；Playwright Chromium/WebKit 及移动 Chromium/WebKit 均完成“打开二维码深链 → 明确确认 → 进入 DeepSeek Harness → 刷新后保持会话”，本机安装的 Google Chrome 额外通过 2/2。完整记录见 [Web 安全加固与验证实录](docs/09-web-security-hardening.md)。本结论不包含实体 Safari 与尚待下一阶段验证的移动端 App。
+> **Web 验证状态（2026-09-04）：已通过。** 已对真实 `dsh web` 完成扩展自动化矩阵：HTTP 36/36、HTTPS/WSS 36/36（令牌门禁、WebSocket、跨站、配对，以及设备生命周期的吊销/退出/到期/损坏状态/重启持久化）；设备生命周期矩阵独立通过 18/18。Playwright Chromium、WebKit、移动 Chrome、移动 Safari 24/24 通过：二维码深链 → 确认 → Harness → 刷新保持会话、退出登录、服务端吊销与重新配对恢复、/admin 管理台、中英文切换。见 [安全加固实录](docs/09-web-security-hardening.md) 与[路线图](docs/10-roadmap-to-release.md)。
 
 ## 从源码构建
 

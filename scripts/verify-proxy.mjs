@@ -384,6 +384,104 @@ await check('app compatibility pairing returns a scoped device token, never the 
   expect(body.token !== TOKEN, 'master token returned to app')
 })
 
+await check('GET /session/check is anonymous → 401', async () => {
+  const res = await fetch(`${PROXY}/session/check`)
+  expect(res.status === 401, `HTTP ${res.status}`)
+})
+
+await check('GET /session/check with a device cookie names the device', async () => {
+  const res = await fetch(`${PROXY}/session/check`, {
+    headers: { cookie: `dsh_token=${deviceToken}` },
+  })
+  expect(res.status === 200, `HTTP ${res.status}`)
+  const body = await res.json()
+  expect(body.authenticated === true && body.master === false, `unexpected body: ${JSON.stringify(body)}`)
+  expect(typeof body.deviceId === 'string' && body.deviceId.length > 0, 'deviceId missing')
+  globalThis.probedDeviceId = body.deviceId
+})
+
+await check('GET /devices is master-token only', async () => {
+  const anon = await fetch(`${PROXY}/devices`)
+  expect(anon.status === 401, `anon HTTP ${anon.status}`)
+  const viaDevice = await fetch(`${PROXY}/devices`, { headers: { cookie: `dsh_token=${deviceToken}` } })
+  expect(viaDevice.status === 401, `device token listed devices: HTTP ${viaDevice.status}`)
+  const ok = await fetch(`${PROXY}/devices`, { headers: { authorization: `Bearer ${TOKEN}` } })
+  expect(ok.status === 200, `master HTTP ${ok.status}`)
+  const body = await ok.json()
+  const record = body.devices.find((device) => device.id === globalThis.probedDeviceId)
+  expect(record, 'paired device missing from the registry')
+  expect(record.active === true, `device not active: ${JSON.stringify(record)}`)
+  expect(typeof record.name === 'string' && record.name.length > 0, 'device name missing')
+})
+
+await check('POST /devices/revoke cuts the device off mid-session (HTTP + WS)', async () => {
+  const revoke = await fetch(`${PROXY}/devices/revoke`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ id: globalThis.probedDeviceId }),
+  })
+  expect(revoke.status === 200, `revoke HTTP ${revoke.status}`)
+  expect((await revoke.json()).revoked === true, 'revoke reported false')
+  const ui = await fetch(`${PROXY}/session/check`, { headers: { cookie: `dsh_token=${deviceToken}` } })
+  expect(ui.status === 401, `revoked device still authenticated: HTTP ${ui.status}`)
+  const api = await fetch(`${PROXY}/api/rpc/connection/ping`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${deviceToken}`, 'content-type': 'application/json' },
+    body: '{}',
+  })
+  expect(api.status === 401, `revoked bearer reached upstream: HTTP ${api.status}`)
+  const ws = await wsHandshakeStatus(`${PROXY}/api/events.mux`, { cookie: `dsh_token=${deviceToken}` })
+  expect(ws === 403, `revoked device WS handshake: HTTP ${ws}`)
+})
+
+await check('POST /device/logout is idempotent and clears the cookie', async () => {
+  const mint = await fetch(`${PROXY}/pair/new`, { method: 'POST', headers: { authorization: `Bearer ${TOKEN}` } })
+  const { code } = await mint.json()
+  const pair = await fetch(`${PROXY}/pair`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ code }),
+  })
+  const cookie = (/(?:^|;\s*)dsh_token=[^;]+/.exec(pair.headers.get('set-cookie') ?? ''))?.[0]
+  expect(cookie, 'pairing during logout case failed')
+  for (let round = 0; round < 2; round += 1) {
+    const out = await fetch(`${PROXY}/device/logout`, {
+      method: 'POST',
+      headers: { cookie },
+    })
+    expect(out.status === 200, `logout round ${round}: HTTP ${out.status}`)
+    expect((out.headers.get('set-cookie') ?? '').includes('Max-Age=0'), 'cookie not cleared')
+  }
+})
+
+await check('GET /admin serves the master-gated console page without secrets', async () => {
+  const res = await fetch(`${PROXY}/admin`)
+  expect(res.status === 200, `HTTP ${res.status}`)
+  const html = await res.text()
+  expect(html.includes('data-testid="admin-token"'), 'admin token field missing')
+  expect(!html.toUpperCase().includes(TOKEN.toUpperCase()), 'admin page leaked the master token')
+  expect(res.headers.get('content-security-policy')?.includes("connect-src 'self'"), 'admin CSP missing')
+})
+
+await check('GET /pair/qr.svg mints a master-gated, no-store SVG QR', async () => {
+  const anon = await fetch(`${PROXY}/pair/qr.svg`)
+  expect(anon.status === 401, `anon QR HTTP ${anon.status}`)
+  const res = await fetch(`${PROXY}/pair/qr.svg`, { headers: { authorization: `Bearer ${TOKEN}` } })
+  expect(res.status === 200, `QR HTTP ${res.status}`)
+  expect((res.headers.get('content-type') ?? '').includes('image/svg+xml'), 'not SVG')
+  expect((res.headers.get('cache-control') ?? '').includes('no-store'), 'QR is cacheable')
+  expect((await res.text()).startsWith('<svg'), 'SVG body malformed')
+})
+
+await check('healthz reports upstream health for launcher diagnostics', async () => {
+  const res = await fetch(`${PROXY}/healthz`)
+  const body = await res.json()
+  expect(body.ok === true, 'healthz not ok')
+  expect(body.upstream === true, `upstream not reported healthy: ${JSON.stringify(body)}`)
+})
+
+// Rate limiting consumes the 60 s pairing window for this source IP, so this
+// case must stay last — every /pair call before it shares the same budget.
 await check('pairing attempts are rate-limited (burst → 429)', async () => {
   let saw429 = false
   for (let i = 0; i < 12; i += 1) {
@@ -396,6 +494,7 @@ await check('pairing attempts are rate-limited (burst → 429)', async () => {
   }
   expect(saw429, 'no 429 after a 12-attempt burst')
 })
+
 
 if (failures > 0) {
   console.error(`\n${failures} case(s) failed`)
