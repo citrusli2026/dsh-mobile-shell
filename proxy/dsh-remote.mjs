@@ -3,10 +3,14 @@
  * dsh-remote — token-guard reverse proxy for `dsh web` (mobile/LAN access).
  *
  * DeepSeek Harness intentionally refuses `--host 0.0.0.0` (remote code
- * execution exposure) and ships no auth layer. This proxy is the mobile
- * edition's answer: `dsh web` stays bound to loopback, and dsh-remote owns
- * network reachability plus a bearer-token gate in front of every forwarded
- * request, HTTP and WebSocket alike.
+ * execution exposure). This proxy is the mobile edition's answer: `dsh web`
+ * stays bound to loopback, and dsh-remote owns network reachability plus a
+ * bearer-token gate in front of every forwarded request, HTTP and WebSocket
+ * alike. Kernels since 0.1.2-alpha.2 additionally guard the UI's index
+ * document behind a per-launch token + signed browser cookie; when the
+ * launcher supplies DSH_UPSTREAM_TOKEN the proxy exchanges it for such a
+ * session cookie and presents it on forwarded requests, so paired devices
+ * only ever hold the proxy's own credential.
  *
  * Token presentation (any one of):
  *   1. `GET <any-path>?token=<t>` — legacy login: validates, down-scopes a
@@ -75,6 +79,11 @@
  *
  * Env:
  *   DSH_REMOTE_TOKEN (required)  shared secret; compared in constant time
+ *   DSH_UPSTREAM_TOKEN (optional) upstream `dsh web` launch token; exchanged
+ *                     for a signed, authority-bound session cookie that is
+ *                     attached to every forwarded request. Without it the
+ *                     upstream index gate (kernel ≥ 0.1.2-alpha.2) applies
+ *                     unchanged.
  *   DSH_LISTEN_HOST   default 0.0.0.0      DSH_LISTEN_PORT  default 3081
  *   DSH_TARGET_HOST   default 127.0.0.1    DSH_TARGET_PORT  default 3080
  *   DSH_TLS_CERT / DSH_TLS_KEY  (optional, both required)  PEM file paths
@@ -114,6 +123,66 @@ const TARGET_AUTHORITY = `${TARGET_HOST}:${TARGET_PORT}`
 const COOKIE_NAME = 'dsh_token'
 const DEVICE_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000
 const DEVICE_TOKEN_PREFIX = 'dshd1'
+
+// ── upstream browser session (kernel index gate, ≥ 0.1.2-alpha.2) ───────
+// The upstream serves `/` only to requests carrying its per-launch token or
+// a signed, authority-bound cookie. The proxy exchanges DSH_UPSTREAM_TOKEN
+// once for that cookie (GET /?token=… → 303 + Set-Cookie), caches it until
+// its Max-Age, and presents it on everything it forwards; concurrent and
+// repeated callers share one in-flight exchange. Exchanges are best-effort:
+// failure leaves no cookie and the upstream's own 401 reaches the client.
+const UPSTREAM_TOKEN = process.env.DSH_UPSTREAM_TOKEN
+const upstreamSession = { cookie: undefined, expiresAt: 0, inFlight: undefined }
+
+function exchangeUpstreamSession({ force = false } = {}) {
+  if (UPSTREAM_TOKEN === undefined) return Promise.resolve(undefined)
+  if (!force && upstreamSession.cookie !== undefined && Date.now() < upstreamSession.expiresAt) {
+    return Promise.resolve(upstreamSession.cookie)
+  }
+  if (upstreamSession.inFlight !== undefined) return upstreamSession.inFlight
+  upstreamSession.inFlight = new Promise((resolve) => {
+    const upstream = http.request({
+      host: TARGET_HOST,
+      port: TARGET_PORT,
+      method: 'GET',
+      path: `/?token=${encodeURIComponent(UPSTREAM_TOKEN)}`,
+      headers: { host: TARGET_AUTHORITY },
+      timeout: 3000,
+    }, (upRes) => {
+      upRes.resume()
+      const raw = upRes.headers['set-cookie']?.[0]
+      const pair = raw?.split(';', 1)[0] ?? ''
+      const eq = pair.indexOf('=')
+      if ((upRes.statusCode ?? 500) >= 400 || eq <= 0) {
+        resolve(undefined)
+        return
+      }
+      const maxAgeSeconds = Number(/;[^\s;]*Max-Age=(\d+)/i.exec(raw ?? '')?.[1] ?? 0)
+      upstreamSession.cookie = pair
+      upstreamSession.expiresAt = maxAgeSeconds > 0
+        ? Date.now() + maxAgeSeconds * 1000
+        : Number.MAX_SAFE_INTEGER
+      resolve(upstreamSession.cookie)
+    })
+    upstream.on('timeout', () => upstream.destroy())
+    upstream.on('error', () => resolve(undefined))
+    upstream.end()
+  }).then((cookie) => {
+    upstreamSession.inFlight = undefined
+    return cookie
+  })
+  return upstreamSession.inFlight
+}
+
+/** Attach the cached upstream session cookie without blocking the caller. */
+function withUpstreamSession(headers) {
+  if (upstreamSession.cookie !== undefined && Date.now() < upstreamSession.expiresAt) {
+    headers.cookie = headers.cookie === undefined
+      ? upstreamSession.cookie
+      : `${headers.cookie}; ${upstreamSession.cookie}`
+  }
+  return headers
+}
 
 // Optional TLS (ADR-0006): both PEM paths required, loaded at boot, fail loud.
 const TLS_CERT_PATH = process.env.DSH_TLS_CERT
@@ -489,16 +558,11 @@ function injectRandomUuidPolyfill(body) {
   return { body: Buffer.from(patched, 'utf8'), changed: true }
 }
 
-function forwardHttp(req, res, path) {
+async function forwardHttp(req, res, path) {
   const htmlDocument = req.method !== 'HEAD' && frontendDocumentPath(path)
-  const upstream = http.request({
-    host: TARGET_HOST,
-    port: TARGET_PORT,
-    method: req.method,
-    path,
-    headers: upstreamHeaders(req, { htmlDocument }),
-  })
-  upstream.on('response', (upRes) => {
+  const sessionCookie = await exchangeUpstreamSession()
+
+  const deliver = (upRes) => {
     const contentType = String(upRes.headers['content-type'] ?? '')
     const canPatch = htmlDocument
       && (upRes.statusCode ?? 500) >= 200
@@ -523,12 +587,45 @@ function forwardHttp(req, res, path) {
     }
     res.writeHead(upRes.statusCode ?? 502, upRes.headers)
     upRes.pipe(res)
-  })
-  upstream.on('error', (error) => {
-    if (!res.headersSent) reject(res, 502, `上游主机不可达：${error.message}`)
-    else res.destroy()
-  })
-  req.pipe(upstream)
+  }
+
+  const attempt = (cookie, isRetry) => {
+    const headers = upstreamHeaders(req, { htmlDocument })
+    if (cookie !== undefined) {
+      headers.cookie = headers.cookie === undefined ? cookie : `${headers.cookie}; ${cookie}`
+    }
+    const upstream = http.request({
+      host: TARGET_HOST,
+      port: TARGET_PORT,
+      method: req.method,
+      path,
+      headers,
+    })
+    upstream.on('response', (upRes) => {
+      // The kernel 401s only the index document: a rejected cookie means the
+      // upstream rotated its secret (fresh DSH_HOME, new activation). Re-file
+      // the launch-token exchange once; the replay is body-less (GET only).
+      if ((upRes.statusCode ?? 500) === 401 && !isRetry && htmlDocument) {
+        exchangeUpstreamSession({ force: true }).then((fresh) => {
+          if (fresh === undefined || fresh === cookie) {
+            deliver(upRes)
+            return
+          }
+          upRes.resume()
+          attempt(fresh, true)
+        })
+        return
+      }
+      deliver(upRes)
+    })
+    upstream.on('error', (error) => {
+      if (!res.headersSent) reject(res, 502, `上游主机不可达：${error.message}`)
+      else res.destroy()
+    })
+    req.pipe(upstream)
+  }
+
+  attempt(sessionCookie, false)
 }
 
 const CORS_HEADERS = {
@@ -943,7 +1040,7 @@ server.on('upgrade', (req, socket, head) => {
     port: TARGET_PORT,
     method: 'GET',
     path: stripTokenParam(url),
-    headers: upgradeHeaders(req),
+    headers: withUpstreamSession(upgradeHeaders(req)),
   })
   upstream.on('upgrade', (upRes, upSocket, upHead) => {
     const lines = Object.entries(upRes.headers)
@@ -996,6 +1093,9 @@ server.listen(LISTEN_PORT, LISTEN_HOST, async () => {
     console.log(`dsh-remote: upstream dsh web probe failed at http://${TARGET_AUTHORITY}`)
   }
   announcePairingCode(mintPairCode())
+  // Warm the upstream session so the first paired device load succeeds even
+  // before any forwarded request triggers a lazy exchange.
+  void exchangeUpstreamSession()
   if (process.stdin.isTTY) console.log('dsh-remote: enter n and press Return for a new pairing QR')
   console.log('dsh-remote: mint more with  curl -X POST -H "Authorization: Bearer $DSH_REMOTE_TOKEN" <this-url>/pair/new')
   if (ADMIN_HTML) console.log(`dsh-remote: device admin console at ${SCHEME}://<this-host>:${LISTEN_PORT}/admin`)

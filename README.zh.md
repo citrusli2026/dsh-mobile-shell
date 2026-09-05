@@ -45,6 +45,8 @@ node dist/web/start.mjs
 
 默认代理监听 `0.0.0.0:3081`，会提供 Web 启动页、一次性配对码和二维码所需的配对 URL。可用 `DSH_LISTEN_HOST`、`DSH_LISTEN_PORT`、`DSH_TARGET_HOST`、`DSH_TARGET_PORT` 覆盖地址；公网使用时还应同时配置 `DSH_TLS_CERT`、`DSH_TLS_KEY` 和可信的 `DSH_PUBLIC_URL`。明文 HTTP 只适用于可信局域网或组网网络，不要做端口转发。
 
+**上游认证**：0.1.2-alpha.2 起的 `dsh web` 只向持有单次启动令牌或签名浏览器 cookie 的请求提供 UI 首页文档。把启动令牌通过 `DSH_UPSTREAM_TOKEN` 传给代理后，代理会用它换取该 cookie 并附在每一条转发请求上——设备仍然只对代理认证。不传该变量时，已认证内核会用自己的 401 拒绝被转发的首页请求。
+
 **设备管理**：每台配对设备都会登记进 `DSH_STATE_FILE`（默认 `proxy/dsh-devices.json`；0600 权限、原子写入，文件损坏时拒绝启动）。浏览器打开 `/admin` 并输入主令牌，即可查看设备列表（名称、签发时间、最后使用、到期）、单独吊销某台设备、签发新配对码或下载 SVG 二维码。启动页提供「退出当前设备」「忘记此主机」；会话被吊销或过期时会给出明确的重新配对引导，而不是笼统的 401。轮换 `DSH_REMOTE_TOKEN` 可一次性吊销全部设备。详见 [ADR-0010](docs/decisions/ADR-0010-device-registry-admin-i18n.md) 与[反向代理与组网部署指南](docs/12-reverse-proxy-and-networking.md)。
 
 桌面端集成示例：先在本仓库生成 `dist/web`，再在 `dsh-desktop` 中执行 `DSH_MOBILE_SHELL_WEB_ROOT=/绝对路径/dsh-mobile-shell/dist/web pnpm run build`。Electron 安装包只携带这一份 Web 产物，Android/iOS 工程仍属于本仓库的独立发布面。
