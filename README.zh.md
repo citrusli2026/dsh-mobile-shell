@@ -31,7 +31,7 @@ npm run verify:web
 `dist/web/web-artifact.json` 是稳定的集成契约，声明 `proxy`、`launcher` 和 `pairing` 三个入口以及格式版本。桌面端只读取这个 manifest；因此本仓库内部可以继续调整源码目录，桌面端不需要跟着改路径。发布时可直接分发目录，或打成压缩包：
 
 ```sh
-tar -czf dist/dsh-mobile-shell-v1.0.0-web.tar.gz -C dist/web .
+tar -czf dist/dsh-mobile-shell-v1.0.2-web.tar.gz -C dist/web .
 ```
 
 外部主机只需自行启动 loopback 上的 `dsh web`，再启动产物中的代理；两者是独立进程：
@@ -53,14 +53,14 @@ node dist/web/start.mjs
 
 ## 版本号
 
-当前项目版本为 `1.0.0`，唯一来源是根目录 `package.json`。代理包、Capacitor 包、Android 的 `versionName`、iOS 的 `MARKETING_VERSION` 和 Web 产物 manifest 都会与它校验一致：
+当前项目版本为 `1.0.2`，唯一来源是根目录 `package.json`。代理包、Capacitor 包、Android 的 `versionName`、iOS 的 `MARKETING_VERSION` 和 Web 产物 manifest 都会与它校验一致：
 
 ```sh
 npm run verify:version
 npm run package:web
 ```
 
-发布标签统一使用 `v<版本号>` 格式；发布前可用 `node scripts/verify-version.mjs v1.0.0` 显式校验。推送匹配标签后会自动构建并发布 Android、iOS 和 Web 三类产物。已有历史标签不回写。
+发布标签统一使用 `v<版本号>` 格式；发布前可用 `node scripts/verify-version.mjs v1.0.2` 显式校验。推送匹配标签后会自动构建并发布 Android、iOS 和 Web 三类产物。已有历史标签不回写。
 
 ## 快速开始：启动 / 扫码 / 确认
 

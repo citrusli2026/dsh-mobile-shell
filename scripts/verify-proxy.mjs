@@ -151,6 +151,7 @@ await check('GET /launch without token → launcher page', async () => {
 })
 
 const session = { cookie: '' }
+let proxiedUiHtml = ''
 await check('login with the right token → 302 + down-scoped HttpOnly cookie', async () => {
   const res = await fetch(`${PROXY}/?token=${encodeURIComponent(TOKEN)}`, { redirect: 'manual' })
   expect(res.status === 302, `HTTP ${res.status}`)
@@ -165,9 +166,18 @@ await check('GET / with session cookie → the real dsh web UI', async () => {
   const res = await fetch(`${PROXY}/`, { headers: session })
   expect(res.status === 200, `HTTP ${res.status}`)
   const html = await res.text()
+  proxiedUiHtml = html
   expect(html.includes('DeepSeek Harness'), 'title marker missing')
   expect(html.includes('data-dsh-remote-random-uuid-polyfill'), 'LAN crypto.randomUUID compatibility shim missing')
   expect(html.includes('getRandomValues'), 'UUID shim does not use Web Crypto randomness')
+})
+
+await check('Harness batched plugin paths keep their double-question query syntax', async () => {
+  const rawPath = /["']([^"']*\/plugins\/\?\?[^"']+)["']/.exec(proxiedUiHtml)?.[1]
+    ?.replaceAll('&amp;', '&')
+  expect(rawPath, 'no batched plugin preload found in the UI HTML')
+  const res = await fetch(new URL(rawPath, PROXY), { headers: session })
+  expect(res.status === 200, `batched plugin preload returned HTTP ${res.status}: ${rawPath}`)
 })
 
 await check('POST /api without cookie → 401', async () => {

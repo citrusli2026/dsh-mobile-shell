@@ -1,6 +1,6 @@
 {
   "name": "@dsh-mobile/app",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "private": true,
   "description": "dsh-mobile: Capacitor shell connecting to a self-hosted DeepSeek Harness (dsh web) host",
   "type": "module",

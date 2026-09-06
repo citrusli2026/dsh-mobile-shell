@@ -492,6 +492,11 @@ function sessionCookie(value) {
 }
 
 function stripTokenParam(url) {
+  // Harness batches plugin modules behind paths such as `/plugins/??a,b`.
+  // Touching URLSearchParams normalizes that second `?` to `%3F` and breaks
+  // the upstream route, so preserve the raw query whenever there is no
+  // legacy login token to remove.
+  if (!url.searchParams.has('token')) return url.pathname + url.search
   url.searchParams.delete('token')
   return url.pathname + (url.searchParams.size ? url.search : '')
 }
