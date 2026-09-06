@@ -67,7 +67,13 @@ jobs:
         run: npm run test:e2e --prefix proxy
 
       - name: Run the HTTP smoke matrix after browser E2E
-        run: DSH_REMOTE_TOKEN=ci-test-token-123456 node scripts/verify-proxy.mjs
+        run: |
+          DSH_REMOTE_TOKEN=ci-test-token-123456 DSH_UPSTREAM_TOKEN="$DSH_UPSTREAM_TOKEN" \
+            DSH_LISTEN_PORT=3084 DSH_STATE_FILE="$RUNNER_TEMP/dsh-remote-smoke-devices.json" \
+            node proxy/dsh-remote.mjs > proxy-smoke.log 2>&1 &
+          sleep 1
+          PROXY_URL=http://127.0.0.1:3084 DSH_REMOTE_TOKEN=ci-test-token-123456 \
+            node scripts/verify-proxy.mjs
 
       - name: Run the TLS variant of the matrix (self-signed test cert)
         run: |

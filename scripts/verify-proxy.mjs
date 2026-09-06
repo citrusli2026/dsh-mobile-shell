@@ -220,17 +220,17 @@ await check('authenticated cross-origin API request → 403', async () => {
 })
 
 await check('WS handshake without token → 403', async () => {
-  const status = await wsHandshakeStatus(`${PROXY}/api/events.mux`, {})
+  const status = await wsHandshakeStatus(`${PROXY}/api/remote.mux`, {})
   expect(status === 403, `HTTP ${status}`)
 })
 
 await check('WS handshake with cookie → 101', async () => {
-  const status = await wsHandshakeStatus(`${PROXY}/api/events.mux`, session)
+  const status = await wsHandshakeStatus(`${PROXY}/api/remote.mux`, session)
   expect(status === 101, `HTTP ${status}`)
 })
 
 await check('cross-origin WS handshake with cookie → 403', async () => {
-  const status = await wsHandshakeStatus(`${PROXY}/api/events.mux`, {
+  const status = await wsHandshakeStatus(`${PROXY}/api/remote.mux`, {
     ...session,
     origin: 'https://attacker.invalid',
   })
@@ -238,7 +238,7 @@ await check('cross-origin WS handshake with cookie → 403', async () => {
 })
 
 await check('malformed Host WS handshake → 400 and proxy remains alive', async () => {
-  const status = await wsHandshakeStatus(`${PROXY}/api/events.mux`, { host: '[' })
+  const status = await wsHandshakeStatus(`${PROXY}/api/remote.mux`, { host: '[' })
   expect(status === 400, `HTTP ${status}`)
   const health = await fetch(`${PROXY}/healthz`)
   expect(health.status === 200, `proxy died after malformed WS Host: HTTP ${health.status}`)
@@ -441,7 +441,7 @@ await check('POST /devices/revoke cuts the device off mid-session (HTTP + WS)', 
     body: '{}',
   })
   expect(api.status === 401, `revoked bearer reached upstream: HTTP ${api.status}`)
-  const ws = await wsHandshakeStatus(`${PROXY}/api/events.mux`, { cookie: `dsh_token=${deviceToken}` })
+  const ws = await wsHandshakeStatus(`${PROXY}/api/remote.mux`, { cookie: `dsh_token=${deviceToken}` })
   expect(ws === 403, `revoked device WS handshake: HTTP ${ws}`)
 })
 

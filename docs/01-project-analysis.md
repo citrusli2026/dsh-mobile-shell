@@ -33,7 +33,7 @@
 传输协议（`packages/client/connection/src/`）：
 
 - 上行：HTTP POST 到 `/api/<channel>/<endpoint>`（`http-bridge.ts`、`client/rpc.ts`），流式响应用 SSE。
-- 下行：两条 WebSocket 事件流 `/api/events.mux` 与 `/api/events.host`（`websocket-downlink.ts`）；WS 上客户端发消息属协议违规，上行永远走 HTTP。
+- 下行：当前 Harness 通过 `/api/remote.mux` 复用 WebSocket 远程流；上行的一元调用仍走 HTTP。
 - 浏览器端 API 基地址取自 `location.origin`，唯一可覆盖点是 `client/rpc.ts` 的 `resolveBase()`（同源部署的假设集中在这一个函数）。
 
 能力执行位置：文件系统、Bash/子进程、持久终端、LSP、MCP、E2B 云沙箱等全部在主机侧经 capability seam（Service Definition / Provider / Consumer 三角色，`docs/architecture.md`）执行。模型推理走远端 DeepSeek API（HTTPS），本地不跑模型。

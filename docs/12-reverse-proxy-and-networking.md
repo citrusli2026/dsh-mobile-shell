@@ -6,7 +6,7 @@
 
 1. `dsh web` 永远只监听 loopback（上游刻意拒绝 `0.0.0.0`）；对外可达性由 `dsh-remote` 或它前面的反代提供。
 2. 公网部署必须全程 HTTPS；明文 HTTP 只允许可信局域网/ mesh，且绝不端口转发。
-3. 反代必须原样传递 WebSocket 升级（`Upgrade`/`Connection` 头），否则事件流（`/api/events.mux`）会退化成 426/502。
+3. 反代必须原样传递 WebSocket 升级（`Upgrade`/`Connection` 头），否则事件流（`/api/remote.mux`）会退化成 426/502。
 
 ## 1. Caddy（推荐，自动 HTTPS）
 
