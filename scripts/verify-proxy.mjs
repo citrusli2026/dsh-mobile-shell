@@ -10,7 +10,8 @@
  *   DSH_REMOTE_TOKEN=ci-test-token-123456 node scripts/verify-proxy.mjs
  *
  * Env: PROXY_URL (default http://127.0.0.1:3081), UPSTREAM_URL (default
- * http://127.0.0.1:3080), DSH_REMOTE_TOKEN (required).
+ * http://127.0.0.1:3080), DSH_REMOTE_TOKEN (required). DSH_UPSTREAM_TOKEN is
+ * passed to the proxy when the installed dsh CLI protects its local web UI.
  */
 import net from 'node:net'
 import tls from 'node:tls'
@@ -109,7 +110,7 @@ function rawHttpStatus(url, request) {
 
 await check('upstream dsh web is reachable', async () => {
   const res = await fetch(`${UPSTREAM}/`)
-  expect(res.ok, `HTTP ${res.status} from ${UPSTREAM}/ — is \`dsh web\` running?`)
+  expect(res.status < 500, `HTTP ${res.status} from ${UPSTREAM}/ — is \`dsh web\` running?`)
 })
 
 await check('healthz answers 200 with CORS * without a token', async () => {

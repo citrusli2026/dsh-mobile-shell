@@ -43,7 +43,12 @@ jobs:
           dsh web --port 3080 > dsh.log 2>&1 &
           attempt=1
           while [ "$attempt" -le 60 ]; do
-            curl -sf -o /dev/null http://127.0.0.1:3080/ && exit 0
+            status=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3080/ || true)
+            launch_url=$(sed -n 's/^dsh web: //p' dsh.log | tail -n 1)
+            if [ "$status" != "000" ] && [ -n "$launch_url" ]; then
+              echo "DSH_UPSTREAM_TOKEN=${launch_url#*token=}" >> "$GITHUB_ENV"
+              exit 0
+            fi
             sleep 1
             attempt=$((attempt + 1))
           done
@@ -51,7 +56,8 @@ jobs:
 
       - name: Start dsh-remote
         run: |
-          DSH_REMOTE_TOKEN=ci-test-token-123456 node proxy/dsh-remote.mjs > proxy.log 2>&1 &
+          DSH_REMOTE_TOKEN=ci-test-token-123456 DSH_UPSTREAM_TOKEN="$DSH_UPSTREAM_TOKEN" \
+            node proxy/dsh-remote.mjs > proxy.log 2>&1 &
           sleep 1
 
       - name: Run Web E2E in Chromium, WebKit, and mobile viewports
@@ -67,7 +73,7 @@ jobs:
         run: |
           openssl req -x509 -newkey rsa:2048 -keyout tls-key.pem -out tls-cert.pem \
             -days 1 -nodes -subj "/CN=dsh-remote-ci"
-          DSH_REMOTE_TOKEN=ci-test-token-123456 DSH_LISTEN_PORT=3082 \
+          DSH_REMOTE_TOKEN=ci-test-token-123456 DSH_UPSTREAM_TOKEN="$DSH_UPSTREAM_TOKEN" DSH_LISTEN_PORT=3082 \
             DSH_TLS_CERT=$PWD/tls-cert.pem DSH_TLS_KEY=$PWD/tls-key.pem \
             node proxy/dsh-remote.mjs > proxy-tls.log 2>&1 &
           sleep 1
