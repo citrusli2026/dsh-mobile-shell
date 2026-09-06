@@ -44,7 +44,7 @@ jobs:
           attempt=1
           while [ "$attempt" -le 60 ]; do
             status=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3080/ || true)
-            launch_url=$(sed -n 's/^dsh web: //p' dsh.log | tail -n 1)
+            launch_url=$(awk '/^dsh web: http:\/\/.*[?&]token=/{print $3; exit}' dsh.log)
             if [ "$status" != "000" ] && [ -n "$launch_url" ]; then
               echo "DSH_UPSTREAM_TOKEN=${launch_url#*token=}" >> "$GITHUB_ENV"
               exit 0
