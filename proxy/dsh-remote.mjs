@@ -769,9 +769,6 @@ function handleRequest(req, res) {
 // address — phones on different nets (physical LAN + VPN virtual adapters)
 // pair against the same session store. Each iteration reuses the LISTEN_HOST
 // name, so the body below is untouched.
-for (const LISTEN_HOST of LISTEN_HOST_LABELS) {
-const server = (TLS ? https.createServer(TLS, handleRequest) : http.createServer(handleRequest))
-
 async function handle(req, res) {
   const url = requestUrl(req)
   if (!url) {
@@ -1039,85 +1036,89 @@ async function handle(req, res) {
   forwardHttp(req, res, stripTokenParam(url))
 }
 
-server.on('upgrade', (req, socket, head) => {
-  const url = requestUrl(req, TLS ? 'https' : 'http')
-  if (!url) {
-    socket.write('HTTP/1.1 400 Bad Request\r\n\r\n')
-    socket.destroy()
-    return
-  }
-  const ok = accessTokenOk(url.searchParams.get('token'))
-    || accessTokenOk(readCookie(req, COOKIE_NAME))
-    || accessTokenOk(bearerToken(req))
-  if (!ok || !requestOriginOk(req)) {
-    socket.write('HTTP/1.1 403 Forbidden\r\n\r\n')
-    socket.destroy()
-    return
-  }
-  const upstream = http.request({
-    host: TARGET_HOST,
-    port: TARGET_PORT,
-    method: 'GET',
-    path: stripTokenParam(url),
-    headers: withUpstreamSession(upgradeHeaders(req)),
+for (const LISTEN_HOST of LISTEN_HOST_LABELS) {
+  const server = (TLS ? https.createServer(TLS, handleRequest) : http.createServer(handleRequest))
+  server.on('upgrade', (req, socket, head) => {
+    const url = requestUrl(req, TLS ? 'https' : 'http')
+    if (!url) {
+      socket.write('HTTP/1.1 400 Bad Request\r\n\r\n')
+      socket.destroy()
+      return
+    }
+    const ok = accessTokenOk(url.searchParams.get('token'))
+      || accessTokenOk(readCookie(req, COOKIE_NAME))
+      || accessTokenOk(bearerToken(req))
+    if (!ok || !requestOriginOk(req)) {
+      socket.write('HTTP/1.1 403 Forbidden\r\n\r\n')
+      socket.destroy()
+      return
+    }
+    const upstream = http.request({
+      host: TARGET_HOST,
+      port: TARGET_PORT,
+      method: 'GET',
+      path: stripTokenParam(url),
+      headers: withUpstreamSession(upgradeHeaders(req)),
+    })
+    upstream.on('upgrade', (upRes, upSocket, upHead) => {
+      const lines = Object.entries(upRes.headers)
+        .map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : v}\r\n`)
+        .join('')
+      socket.write(`HTTP/1.1 101 Switching Protocols\r\n${lines}\r\n`)
+      if (upHead?.length) socket.write(upHead)
+      upSocket.pipe(socket)
+      socket.pipe(upSocket)
+      if (head?.length) upSocket.write(head)
+      upSocket.on('error', () => socket.destroy())
+      socket.on('error', () => upSocket.destroy())
+    })
+    upstream.on('response', (upRes) => {
+      // Upgrade refused upstream: surface the status and tear down.
+      socket.write(`HTTP/1.1 ${upRes.statusCode} Upgrade Refused\r\n\r\n`)
+      socket.destroy()
+      upRes.resume()
+    })
+    upstream.on('error', () => {
+      socket.write('HTTP/1.1 502 Bad Gateway\r\n\r\n')
+      socket.destroy()
+    })
+    upstream.end()
   })
-  upstream.on('upgrade', (upRes, upSocket, upHead) => {
-    const lines = Object.entries(upRes.headers)
-      .map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : v}\r\n`)
-      .join('')
-    socket.write(`HTTP/1.1 101 Switching Protocols\r\n${lines}\r\n`)
-    if (upHead?.length) socket.write(upHead)
-    upSocket.pipe(socket)
-    socket.pipe(upSocket)
-    if (head?.length) upSocket.write(head)
-    upSocket.on('error', () => socket.destroy())
-    socket.on('error', () => upSocket.destroy())
-  })
-  upstream.on('response', (upRes) => {
-    // Upgrade refused upstream: surface the status and tear down.
-    socket.write(`HTTP/1.1 ${upRes.statusCode} Upgrade Refused\r\n\r\n`)
-    socket.destroy()
-    upRes.resume()
-  })
-  upstream.on('error', () => {
-    socket.write('HTTP/1.1 502 Bad Gateway\r\n\r\n')
-    socket.destroy()
-  })
-  upstream.end()
-})
 
-server.on('clientError', (_error, socket) => {
-  if (socket.writable) socket.end('HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n')
-})
+  server.on('clientError', (_error, socket) => {
+    if (socket.writable) socket.end('HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n')
+  })
 
-// SSE streams and WS tunnels are long-lived; Node's default request/headers
-// timeouts would kill them mid-session.
-server.requestTimeout = 0
-server.headersTimeout = 0
-server.timeout = 0
+  // SSE streams and WS tunnels are long-lived; Node's default request/headers
+  // timeouts would kill them mid-session.
+  server.requestTimeout = 0
+  server.headersTimeout = 0
+  server.timeout = 0
 
-server.listen(LISTEN_PORT, LISTEN_HOST, async () => {
-  console.log(`dsh-remote: ${SCHEME}://${LISTEN_HOST}:${LISTEN_PORT} -> http://${TARGET_AUTHORITY} (token required)`)
-  console.log(`dsh-remote: TLS ${TLS ? 'on (user-supplied certificate)' : 'off — plain HTTP, trusted LAN/mesh only; do not port-forward'}`)
-  console.log(`dsh-remote: scannable pairing bases: ${PAIRING_BASES.join(', ')}`)
-  if (PAIRING_BASES.length > 1 || PAIRING_BASES[0] === undefined) {
-    console.log('dsh-remote: multiple interfaces — pick one explicitly with DSH_PUBLIC_URL if the printed links do not match your network')
-  }
-  try {
-    const upstream = await upstreamHealth()
-    console.log(upstream.ok
-      ? `dsh-remote: upstream dsh web healthy at http://${TARGET_AUTHORITY}`
-      : `dsh-remote: WARNING upstream dsh web not healthy at http://${TARGET_AUTHORITY} (${upstream.error}) — pairing will succeed but the UI will not load`)
-  } catch {
-    console.log(`dsh-remote: upstream dsh web probe failed at http://${TARGET_AUTHORITY}`)
-  }
-  announcePairingCode(mintPairCode())
-  // Warm the upstream session so the first paired device load succeeds even
-  // before any forwarded request triggers a lazy exchange.
-  void exchangeUpstreamSession()
-  if (process.stdin.isTTY) console.log('dsh-remote: enter n and press Return for a new pairing QR')
-  console.log('dsh-remote: mint more with  curl -X POST -H "Authorization: Bearer $DSH_REMOTE_TOKEN" <this-url>/pair/new')
-  if (ADMIN_HTML) console.log(`dsh-remote: device admin console at ${SCHEME}://<this-host>:${LISTEN_PORT}/admin`)
-  enableTerminalPairing()
-})
+  server.listen(LISTEN_PORT, LISTEN_HOST, async () => {
+    console.log(`dsh-remote: ${SCHEME}://${LISTEN_HOST}:${LISTEN_PORT} -> http://${TARGET_AUTHORITY} (token required)`)
+    console.log(`dsh-remote: TLS ${TLS ? 'on (user-supplied certificate)' : 'off — plain HTTP, trusted LAN/mesh only; do not port-forward'}`)
+    console.log(`dsh-remote: scannable pairing bases: ${PAIRING_BASES.join(', ')}`)
+    if (PAIRING_BASES.length > 1 || PAIRING_BASES[0] === undefined) {
+      console.log('dsh-remote: multiple interfaces — pick one explicitly with DSH_PUBLIC_URL if the printed links do not match your network')
+    }
+    try {
+      const upstream = await upstreamHealth()
+      console.log(upstream.ok
+        ? `dsh-remote: upstream dsh web healthy at http://${TARGET_AUTHORITY}`
+        : `dsh-remote: WARNING upstream dsh web not healthy at http://${TARGET_AUTHORITY} (${upstream.error}) — pairing will succeed but the UI will not load`)
+    } catch {
+      console.log(`dsh-remote: upstream dsh web probe failed at http://${TARGET_AUTHORITY}`)
+    }
+    announcePairingCode(mintPairCode())
+    // Warm the upstream session so the first paired device load succeeds even
+    // before any forwarded request triggers a lazy exchange.
+    void exchangeUpstreamSession()
+    if (process.stdin.isTTY) console.log('dsh-remote: enter n and press Return for a new pairing QR')
+    console.log('dsh-remote: mint more with  curl -X POST -H "Authorization: Bearer $DSH_REMOTE_TOKEN" <this-url>/pair/new')
+    if (ADMIN_HTML) console.log(`dsh-remote: device admin console at ${SCHEME}://<this-host>:${LISTEN_PORT}/admin`)
+    enableTerminalPairing()
+  })
 }
+
+
