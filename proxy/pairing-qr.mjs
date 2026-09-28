@@ -29,6 +29,7 @@ export function discoverPublicBases({
   listenHost,
   listenPort,
   publicUrl,
+  listenHosts,
   interfaces = networkInterfaces(),
 }) {
   if (publicUrl) return [normalizePublicBase(publicUrl)]
@@ -38,7 +39,9 @@ export function discoverPublicBases({
   }
 
   let hosts
-  if (WILDCARD_HOSTS.has(listenHost)) {
+  if (Array.isArray(listenHosts) && listenHosts.length > 0) {
+    hosts = listenHosts
+  } else if (WILDCARD_HOSTS.has(listenHost)) {
     hosts = Object.values(interfaces)
       .flatMap((entries) => entries ?? [])
       .filter((entry) => (entry.family === 'IPv4' || entry.family === 4) && !entry.internal)

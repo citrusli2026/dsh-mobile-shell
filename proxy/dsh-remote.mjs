@@ -116,6 +116,14 @@ if (!TOKEN || TOKEN.length < 8) {
   process.exit(1)
 }
 const LISTEN_HOST = process.env.DSH_LISTEN_HOST ?? '0.0.0.0'
+// Multi-NIC listen (#65): DSH_LAN_IPS is a comma list of specific addresses
+// (one full server each — handlers included); without it the single
+// DSH_LISTEN_HOST (wildcard by default) applies as before.
+const LISTEN_HOSTS = (process.env.DSH_LAN_IPS ?? '')
+  .split(',')
+  .map((host) => host.trim())
+  .filter((host) => host !== '')
+const LISTEN_HOST_LABELS = LISTEN_HOSTS.length > 0 ? LISTEN_HOSTS : [LISTEN_HOST]
 const LISTEN_PORT = Number(process.env.DSH_LISTEN_PORT ?? 3081)
 const TARGET_HOST = process.env.DSH_TARGET_HOST ?? '127.0.0.1'
 const TARGET_PORT = Number(process.env.DSH_TARGET_PORT ?? 3080)
@@ -200,6 +208,7 @@ try {
   PAIRING_BASES = discoverPublicBases({
     scheme: SCHEME,
     listenHost: LISTEN_HOST,
+    listenHosts: LISTEN_HOSTS.length > 0 ? LISTEN_HOSTS : undefined,
     listenPort: LISTEN_PORT,
     publicUrl: process.env.DSH_PUBLIC_URL,
   })
@@ -756,6 +765,11 @@ function handleRequest(req, res) {
   })
 }
 
+// Multi-NIC listen (#65): one full server (handlers included) per bound
+// address — phones on different nets (physical LAN + VPN virtual adapters)
+// pair against the same session store. Each iteration reuses the LISTEN_HOST
+// name, so the body below is untouched.
+for (const LISTEN_HOST of LISTEN_HOST_LABELS) {
 const server = (TLS ? https.createServer(TLS, handleRequest) : http.createServer(handleRequest))
 
 async function handle(req, res) {
@@ -1106,3 +1120,4 @@ server.listen(LISTEN_PORT, LISTEN_HOST, async () => {
   if (ADMIN_HTML) console.log(`dsh-remote: device admin console at ${SCHEME}://<this-host>:${LISTEN_PORT}/admin`)
   enableTerminalPairing()
 })
+}
