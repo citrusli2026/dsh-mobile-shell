@@ -79,7 +79,7 @@ Then use exactly three steps:
 2. **Scan**: connect the phone and computer to the same Wi-Fi, then scan the terminal QR.
 3. **Confirm**: tap “确认配对并连接” once in the phone browser; the Harness opens.
 
-The scan flow requires no IP, pairing-code, or token entry. The helper rejects public IPs, `0.0.0.0`, and inherited public/TLS configuration; if the computer has multiple LAN addresses, select one explicitly with `DSH_LAN_IP=192.168.1.23 node scripts/start-lan.mjs`. Plain HTTP is still for trusted LANs only—do not port-forward it.
+The scan flow requires no IP, pairing-code, or token entry. The first run may take a few minutes before the QR appears: it downloads the pinned release into the npm cache (`DSH_START_LAN_TOKEN_TIMEOUT_MS` raises that startup budget), and `Ctrl-C` stops both the Harness host and the proxy. The helper rejects public IPs, `0.0.0.0`, and inherited public/TLS configuration; if the computer has multiple LAN addresses, select one explicitly with `DSH_LAN_IP=192.168.1.23 node scripts/start-lan.mjs`. Plain HTTP is still for trusted LANs only—do not port-forward it.
 
 Advanced users can start the host and proxy separately:
 

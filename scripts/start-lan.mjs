@@ -28,6 +28,23 @@ const DEFAULT_LISTEN_PORT = 3081
 export const DSH_RELEASE = '@deepseek-ai/dsh@0.2.1-alpha.1'
 const DSH_RELEASE_VERSION = DSH_RELEASE.slice(DSH_RELEASE.lastIndexOf('@') + 1)
 
+/**
+ * How long the pinned release may take to print its launch token. The first
+ * run against a cold npm cache has to download and unpack the release, which
+ * can take minutes on a slow registry connection; the budget is therefore
+ * minutes, not seconds. Override with DSH_START_LAN_TOKEN_TIMEOUT_MS.
+ */
+export const DEFAULT_LAUNCH_TOKEN_TIMEOUT_MS = 300_000
+export function launchTokenTimeoutMs(env = process.env) {
+  const raw = env.DSH_START_LAN_TOKEN_TIMEOUT_MS
+  if (raw === undefined) return DEFAULT_LAUNCH_TOKEN_TIMEOUT_MS
+  const value = Number(raw)
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new Error(`DSH_START_LAN_TOKEN_TIMEOUT_MS must be a positive integer, got ${raw}`)
+  }
+  return value
+}
+
 export function isPrivateLanIPv4(address) {
   const octets = String(address).split('.').map((part) => Number(part))
   if (octets.length !== 4 || octets.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) {
@@ -203,7 +220,7 @@ async function portInUse(host, port) {
 }
 
 async function waitForUpstream(port, child) {
-  const deadline = Date.now() + 30_000
+  const deadline = Date.now() + 60_000
   while (Date.now() < deadline) {
     if (child.exitCode !== null) throw new Error('dsh web exited before becoming ready')
     try {
@@ -223,7 +240,7 @@ async function waitForUpstream(port, child) {
  * prints `dsh web: <url>?token=...` on stdout; the token is what the proxy
  * exchanges for the upstream browser session (DSH_UPSTREAM_TOKEN).
  */
-function watchForLaunchToken(stream, child, timeoutMs = 60_000) {
+function watchForLaunchToken(stream, child, timeoutMs = launchTokenTimeoutMs()) {
   return new Promise((resolve, reject) => {
     let pending = ''
     let settled = false
@@ -251,8 +268,47 @@ function watchForLaunchToken(stream, child, timeoutMs = 60_000) {
   })
 }
 
-function stop(child) {
-  if (child && child.exitCode === null) child.kill('SIGTERM')
+/**
+ * `npx` is a wrapper: the real `dsh web` host is a grandchild of this process,
+ * so signalling only the direct child would leave the host listening on the
+ * loopback target port after the launcher exits. Child processes are therefore
+ * started as their own process group and signalled as a group.
+ */
+function spawnManaged(command, args, options) {
+  return spawn(command, args, { ...options, detached: process.platform !== 'win32' })
+}
+
+function childExited(child) {
+  return !child || child.exitCode !== null || child.signalCode !== null
+}
+
+function signalChildTree(child, signal) {
+  if (childExited(child)) return
+  try {
+    if (process.platform !== 'win32' && child.pid) {
+      process.kill(-child.pid, signal)
+      return
+    }
+  } catch {}
+  try { child.kill(signal) } catch {}
+}
+
+function waitForExit(child, timeoutMs) {
+  return new Promise((resolve) => {
+    if (childExited(child)) {
+      resolve(true)
+      return
+    }
+    const onExit = () => {
+      clearTimeout(timer)
+      resolve(true)
+    }
+    const timer = setTimeout(() => {
+      child.off('exit', onExit)
+      resolve(false)
+    }, timeoutMs)
+    child.once('exit', onExit)
+  })
 }
 
 async function main() {
@@ -282,22 +338,23 @@ async function main() {
   let host
   let proxy
   let stopping = false
-  const cleanup = (code = 0) => {
+  const cleanup = async (code = 0) => {
     if (stopping) return
     stopping = true
-    stop(proxy)
-    stop(host)
-    setTimeout(() => {
-      stop(proxy)
-      stop(host)
-      process.exit(code)
-    }, 1_500).unref()
+    const children = [proxy, host].filter(Boolean)
+    for (const child of children) signalChildTree(child, 'SIGTERM')
+    const graceful = await Promise.all(children.map((child) => waitForExit(child, 4_000)))
+    if (graceful.includes(false)) {
+      for (const child of children) signalChildTree(child, 'SIGKILL')
+      await Promise.all(children.map((child) => waitForExit(child, 2_000)))
+    }
+    process.exit(code)
   }
-  process.once('SIGINT', () => cleanup(0))
-  process.once('SIGTERM', () => cleanup(0))
+  process.once('SIGINT', () => { void cleanup(0) })
+  process.once('SIGTERM', () => { void cleanup(0) })
 
   try {
-    host = spawn(dshCommand.command, [...dshCommand.args, 'web', '--port', String(targetPort)], {
+    host = spawnManaged(dshCommand.command, [...dshCommand.args, 'web', '--port', String(targetPort)], {
       cwd: ROOT,
       env: process.env,
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -327,7 +384,7 @@ async function main() {
       targetPort,
     })
 
-    proxy = spawn(process.execPath, [path.join(ROOT, 'proxy/dsh-remote.mjs')], {
+    proxy = spawnManaged(process.execPath, [path.join(ROOT, 'proxy/dsh-remote.mjs')], {
       cwd: ROOT,
       env: proxyEnv,
       stdio: 'inherit',
@@ -355,8 +412,10 @@ async function main() {
     console.log('  Press Ctrl-C to stop both dsh web and the LAN proxy.')
     await new Promise(() => {})
   } catch (error) {
-    cleanup(1)
-    throw error
+    // Log before awaiting cleanup: cleanup ends the process once both children
+    // (and with them the loopback/LAN listeners) are gone.
+    console.error(`start-lan: ${error.message}`)
+    await cleanup(1)
   }
 }
 

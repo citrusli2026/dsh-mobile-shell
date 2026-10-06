@@ -23,6 +23,7 @@ import {
   buildProxyEnv,
   choosePrivateLanIPv4,
   isPrivateLanIPv4,
+  launchTokenTimeoutMs,
   listPrivateLanIPv4,
   parseLaunchToken,
   parsePort,
@@ -142,18 +143,20 @@ function waitForOutput(child, pattern, timeoutMs) {
   return new Promise((resolve, reject) => {
     let buffer = ''
     let settled = false
-    const finish = (error, match) => {
+    const finish = (error, result) => {
       if (settled) return
       settled = true
       clearTimeout(timer)
-      error ? reject(error) : resolve(match)
+      error ? reject(error) : resolve(result)
     }
     const onData = (chunk) => {
       process.stdout.write(chunk)
       buffer += chunk.toString('utf8')
       const match = pattern.exec(buffer)
       if (match) {
-        finish(undefined, match)
+        // Resolve both the match and the whole output seen so far: callers
+        // assert on launcher announcements that precede this match.
+        finish(undefined, { match, output: buffer })
         return
       }
       if (buffer.length > 128 * 1024) buffer = buffer.slice(-8 * 1024)
@@ -166,6 +169,42 @@ function waitForOutput(child, pattern, timeoutMs) {
     child.stderr.on('data', (chunk) => process.stderr.write(chunk))
     child.once('exit', (code) => finish(new Error(`launcher exited early (code=${code ?? 'null'})`)))
   })
+}
+
+function portListening(host, port) {
+  return new Promise((resolve) => {
+    const socket = net.connect(port, host)
+    let settled = false
+    const finish = (value) => {
+      if (settled) return
+      settled = true
+      socket.destroy()
+      resolve(value)
+    }
+    socket.once('connect', () => finish(true))
+    socket.once('error', () => finish(false))
+    socket.setTimeout(400, () => finish(false))
+  })
+}
+
+/**
+ * R3: after the launcher is stopped, neither the DSH host (target port) nor
+ * the proxy (listen port) may keep listening. `npx` runs the host as a
+ * grandchild, so this asserts the launcher tears down its whole process tree.
+ */
+async function waitForPortsFree(pairs, timeoutMs) {
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    const busy = []
+    for (const [host, port] of pairs) {
+      if (await portListening(host, port)) busy.push(`${host}:${port}`)
+    }
+    if (busy.length === 0) return
+    if (Date.now() >= deadline) {
+      throw new Error(`launcher shutdown left listeners behind: ${busy.join(', ')}`)
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250))
+  }
 }
 
 function wsHandshakeStatus(host, port, headers) {
@@ -208,6 +247,10 @@ if (lanIp === undefined) {
 
 const targetPort = Number(process.env.DSH_START_LAN_TARGET_PORT ?? 34080)
 const listenPort = Number(process.env.DSH_START_LAN_LISTEN_PORT ?? 34081)
+// The launcher waits for the pinned release's launch token; a cold npm cache
+// has to download the release first, so the harness budget must exceed the
+// launcher's own token budget plus time for npm/npx startup and pairing.
+const launcherBudgetMs = launchTokenTimeoutMs(process.env) + 120_000
 const workdir = mkdtempSync(path.join(tmpdir(), 'dsh-start-lan-'))
 const launcher = spawn(process.execPath, [path.join(repoRoot, 'scripts/start-lan.mjs')], {
   cwd: repoRoot,
@@ -222,9 +265,9 @@ const launcher = spawn(process.execPath, [path.join(repoRoot, 'scripts/start-lan
 })
 
 try {
-  const ready = await waitForOutput(launcher, /pairing link https?:\/\/[^\s#]*#pair=(\d{6})/, 180_000)
-  const pairingCode = ready[1]
-  expect(ready[0].includes(DSH_RELEASE), 'launcher did not announce the pinned release')
+  const ready = await waitForOutput(launcher, /pairing link https?:\/\/[^\s#]*#pair=(\d{6})/, launcherBudgetMs)
+  const pairingCode = ready.match[1]
+  expect(ready.output.includes(DSH_RELEASE), 'launcher did not announce the pinned release')
   console.log(`ok   launcher started the pinned ${DSH_RELEASE} and announced a pairing code`)
 
   const base = `http://${lanIp}:${listenPort}`
@@ -267,15 +310,23 @@ try {
   expect(ws === 101, `paired WS handshake HTTP ${ws}`)
   console.log('ok   paired WebSocket handshake upgrades through the launcher proxy')
 } finally {
-  launcher.kill('SIGTERM')
+  if (launcher.exitCode === null && launcher.signalCode === null) launcher.kill('SIGTERM')
   await new Promise((resolve) => {
-    const timer = setTimeout(resolve, 5_000)
+    if (launcher.exitCode !== null || launcher.signalCode !== null) {
+      resolve()
+      return
+    }
+    const timer = setTimeout(resolve, 10_000)
     launcher.once('exit', () => {
       clearTimeout(timer)
       resolve()
     })
   })
   rmSync(workdir, { recursive: true, force: true })
+  // R3 evidence: the launcher must not leave the DSH host on the target port
+  // (it is a grandchild through npx) or the proxy on the LAN listen port.
+  await waitForPortsFree([['127.0.0.1', targetPort], [lanIp, listenPort]], 10_000)
+  console.log('ok   launcher shutdown released the DSH host and proxy ports')
 }
 
 console.log('\nall secure LAN launcher checks passed')
