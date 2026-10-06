@@ -83,9 +83,13 @@ jobs:
       # token, and hand it to the proxy so a paired session reaches the UI,
       # the authenticated API, and the WebSocket mux. Skips (with a note) only
       # when the machine exposes no private LAN IPv4 address.
+      # npm_config_cache points at a fresh directory so this step exercises a
+      # cold first `npx` launch of the pinned release — the global install
+      # above must not be required for the check to pass.
       - name: Launcher integration against the pinned release (paired UI/API/WS)
         env:
           DSH_START_LAN_LIVE: '1'
+          npm_config_cache: ${{ runner.temp }}/dsh-npx-cold-cache
         run: node scripts/verify-start-lan.mjs
 
       - name: Run the TLS variant of the matrix (self-signed test cert)
