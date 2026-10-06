@@ -33,8 +33,9 @@ CI：三条流水线在阶段 2 推送后全绿（含新增 TLS 变体）。
 
 ```sh
 # 主机：照常两个进程
-npx @deepseek-ai/dsh web --port 3080
-DSH_REMOTE_TOKEN=$(openssl rand -hex 16) node proxy/dsh-remote.mjs
+npx @deepseek-ai/dsh@0.2.1-alpha.1 web --port 3080
+# 复制主机打印的启动令牌，交给代理换取上游会话
+DSH_REMOTE_TOKEN=$(openssl rand -hex 16) DSH_UPSTREAM_TOKEN=<启动令牌> node proxy/dsh-remote.mjs
 # 终端打印：pairing code 847291 — single use, expires in 10 min
 
 # 加设备时再签一个：

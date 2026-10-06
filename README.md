@@ -37,15 +37,18 @@ tar -czf dist/dsh-mobile-shell-v1.0.2-web.tar.gz -C dist/web .
 An external host starts `dsh web` on loopback and the artifact proxy as separate processes:
 
 ```sh
-npx @deepseek-ai/dsh web --port 3080
+# 1. Start the pinned host; it prints its launch URL with ?token=…
+npx @deepseek-ai/dsh@0.2.1-alpha.1 web --port 3080
+# 2. Hand that launch token to the proxy so it can open the upstream session
 DSH_REMOTE_TOKEN="$(openssl rand -hex 16)" \
+DSH_UPSTREAM_TOKEN="<token from the dsh web launch URL>" \
 DSH_TARGET_PORT=3080 \
 node dist/web/start.mjs
 ```
 
 The proxy listens on `0.0.0.0:3081` by default and serves the Web launcher, one-time pairing codes, and pairing URLs. Override it with `DSH_LISTEN_HOST`, `DSH_LISTEN_PORT`, `DSH_TARGET_HOST`, and `DSH_TARGET_PORT`. For public access also configure `DSH_TLS_CERT`, `DSH_TLS_KEY`, and a trusted `DSH_PUBLIC_URL`. Plain HTTP is for a trusted LAN or mesh network only; do not port-forward it.
 
-**Upstream authentication:** `dsh web` releases since 0.1.2-alpha.2 serve the UI's index document only to a per-launch token or a signed browser cookie. Pass the launch token as `DSH_UPSTREAM_TOKEN` and the proxy exchanges it once for that cookie and presents it on every forwarded request — devices still authenticate only to the proxy. Without it, an authenticated kernel answers forwarded index requests with its own 401.
+**Upstream authentication:** the pinned compatibility target is the published `@deepseek-ai/dsh@0.2.1-alpha.1` release. `dsh web` releases since 0.1.2-alpha.2 serve the UI's index document only to a per-launch token or a signed browser cookie. Pass the launch token as `DSH_UPSTREAM_TOKEN` and the proxy exchanges it once for that cookie and presents it on every forwarded request — devices still authenticate only to the proxy. Without it, an authenticated kernel answers forwarded index requests with its own 401. `node scripts/start-lan.mjs` captures the token automatically, and upstream `--public-url` lets a host advertise the proxy origin (used by the CI verification).
 
 **Device management:** every paired device is registered in `DSH_STATE_FILE` (default `proxy/dsh-devices.json`; mode 0600, atomic writes, a corrupt file refuses to start). Open `/admin` in a browser, enter the master token, and list devices (name, issued, last used, expiry), revoke one individually, mint a fresh pairing code, or download an SVG QR. The launcher offers "sign out this device" / "forget this host", and a revoked or expired session shows a clear re-pair state instead of a bare 401. Rotating `DSH_REMOTE_TOKEN` revokes every device at once. See [ADR-0010](docs/decisions/ADR-0010-device-registry-admin-i18n.md) and the [reverse proxy & networking guide](docs/12-reverse-proxy-and-networking.md).
 
@@ -64,7 +67,7 @@ Release tags use the `v<version>` form; validate one explicitly with `node scrip
 
 ## Quick start: start / scan / confirm
 
-Run one command on the computer. It starts `dsh web` on loopback and the LAN proxy, selects one private LAN IPv4, generates a fresh random master token in memory, and prints an offline QR:
+Run one command on the computer. It starts the pinned `@deepseek-ai/dsh@0.2.1-alpha.1` release on loopback, captures its upstream launch token, starts the LAN proxy, selects one private LAN IPv4, generates a fresh random master token in memory, and prints an offline QR:
 
 ```sh
 node scripts/start-lan.mjs
@@ -81,8 +84,10 @@ The scan flow requires no IP, pairing-code, or token entry. The helper rejects p
 Advanced users can start the host and proxy separately:
 
 ```sh
-npx @deepseek-ai/dsh web --port 3080
-DSH_REMOTE_TOKEN=$(openssl rand -hex 16) node proxy/dsh-remote.mjs
+npx @deepseek-ai/dsh@0.2.1-alpha.1 web --port 3080
+# copy the launch token printed above; the proxy exchanges it for the upstream session
+DSH_REMOTE_TOKEN=$(openssl rand -hex 16) DSH_UPSTREAM_TOKEN="<launch token>" \
+  node proxy/dsh-remote.mjs
 ```
 
 **On the phone** (same Wi-Fi) — App is also available:

@@ -56,6 +56,23 @@ test.describe('Web QR pairing', () => {
     await expect(page).toHaveTitle(/DeepSeek Harness/)
     await expect(page.locator('body')).toContainText('探索未至之境')
 
+    // The paired browser session must also reach the authenticated HTTP API
+    // with a release-valid payload: settings/describe is the 0.2.1-alpha.1
+    // Typert endpoint and returns the settings namespaces. A reachable but
+    // broken API (404/500) or a non-success envelope fails here.
+    const describe = await page.request.post('/api/settings/describe', {
+      data: {
+        type: 'client-request',
+        rpcId: 'e2e-settings-describe',
+        method: 'settings/describe',
+        payload: { args: {} },
+      },
+    })
+    expect(describe.status()).toBe(200)
+    const describeBody = await describe.json()
+    expect(describeBody.result?.ok).toBe(true)
+    expect(describeBody.result?.value?.namespaces?.length).toBeGreaterThan(0)
+
     const cookies = await page.context().cookies()
     const sessionCookie = cookies.find((cookie) => cookie.name === 'dsh_token')
     expect(sessionCookie?.httpOnly).toBe(true)

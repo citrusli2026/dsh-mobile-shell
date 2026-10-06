@@ -18,9 +18,9 @@ v0.2.0 之前，用手机必须先装 App。本阶段让 dsh-remote 自己伺服
 ## 3. 使用方式（Web 模式）
 
 ```sh
-# 主机侧不变，仍是两条命令
-npx @deepseek-ai/dsh web --port 3080
-DSH_REMOTE_TOKEN=$(openssl rand -hex 16) node proxy/dsh-remote.mjs
+# 主机侧仍是两条命令；第二条需带上主机打印的启动令牌
+npx @deepseek-ai/dsh@0.2.1-alpha.1 web --port 3080
+DSH_REMOTE_TOKEN=$(openssl rand -hex 16) DSH_UPSTREAM_TOKEN=<启动令牌> node proxy/dsh-remote.mjs
 ```
 
 普通用户从仓库根目录运行 `node scripts/start-lan.mjs`，手机/桌面浏览器扫描终端二维码并确认一次即可进入；无需输入代理地址或 6 位配对码。高级用户仍可打开终端打印的代理地址（如 `http://192.168.1.10:3081/`）手工配对。启动页同时仍打包在 App 内，两条路径共用同一配对与安全模型。

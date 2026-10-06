@@ -24,13 +24,27 @@ function baseForHost(scheme, host, port) {
   return `${scheme}://${urlHost(host)}${defaultPort ? '' : `:${port}`}/`
 }
 
+/**
+ * Interface enumeration is best-effort: restricted containers (and some
+ * sandboxes) fail `uv_interface_addresses` outright. Discovery must never
+ * stop the proxy from booting — without a candidate list the pairing base
+ * falls back to loopback, exactly as it does when no interface is up.
+ */
+function availableInterfaces() {
+  try {
+    return networkInterfaces()
+  } catch {
+    return {}
+  }
+}
+
 export function discoverPublicBases({
   scheme,
   listenHost,
   listenPort,
   publicUrl,
   listenHosts,
-  interfaces = networkInterfaces(),
+  interfaces = availableInterfaces(),
 }) {
   if (publicUrl) return [normalizePublicBase(publicUrl)]
   if (scheme !== 'http' && scheme !== 'https') throw new Error(`unsupported scheme: ${scheme}`)
