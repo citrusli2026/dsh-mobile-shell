@@ -5,13 +5,19 @@
  * on the first failure, prints one line per case. Used by CI
  * (.github/workflows/verify-proxy.yml) and runnable locally:
  *
- *   dsh web --port 3080 &
+ *   npx @deepseek-ai/dsh@0.2.1-alpha.1 web --port 3080 &
  *   DSH_REMOTE_TOKEN=ci-test-token-123456 node proxy/dsh-remote.mjs &
  *   DSH_REMOTE_TOKEN=ci-test-token-123456 node scripts/verify-proxy.mjs
  *
  * Env: PROXY_URL (default http://127.0.0.1:3081), UPSTREAM_URL (default
  * http://127.0.0.1:3080), DSH_REMOTE_TOKEN (required). DSH_UPSTREAM_TOKEN is
  * passed to the proxy when the installed dsh CLI protects its local web UI.
+ *
+ * The authenticated API case asserts a release-valid payload: the pinned
+ * 0.2.1-alpha.1 kernel answers `POST /api/settings/describe` through its
+ * Typert gateway with a `server-response` envelope whose `result.ok` is true
+ * and which carries the settings namespaces. A 404/500 or a non-success
+ * envelope is a failure — HTTP reachability alone is not compatibility.
  */
 import net from 'node:net'
 import tls from 'node:tls'
@@ -30,6 +36,21 @@ if (process.env.DSH_VERIFY_INSECURE_TLS === '1') {
   console.log('note: TLS verification disabled (DSH_VERIFY_INSECURE_TLS=1)')
 }
 const SECURE = PROXY.startsWith('https:')
+
+// Release-valid authenticated RPC for the pinned 0.2.1-alpha.1 host: the
+// kernel exposes `settings/describe` on the /api Typert gateway with an empty
+// `args` payload and returns a `server-response` whose `result.ok` is true
+// plus the settings namespaces. The previous `connection/ping` endpoint no
+// longer exists (404), so reachability alone must never pass this case.
+const API_RPC_PATH = '/api/settings/describe'
+function apiRpcBody(rpcId) {
+  return JSON.stringify({
+    type: 'client-request',
+    rpcId,
+    method: 'settings/describe',
+    payload: { args: {} },
+  })
+}
 
 let failures = 0
 async function check(name, fn) {
@@ -174,7 +195,9 @@ await check('GET / with session cookie → the real dsh web UI', async () => {
 })
 
 await check('Harness batched plugin paths keep their double-question query syntax', async () => {
-  const rawPath = /["']([^"']*\/plugins\/\?\?[^"']+)["']/.exec(proxiedUiHtml)?.[1]
+  // 0.2.1-alpha.1 emits relative `plugins/??a,b&rev=…` preloads (older
+  // releases emitted `/plugins/??…`); accept both and resolve against the proxy.
+  const rawPath = /["']([^"']*plugins\/\?\?[^"']+)["']/.exec(proxiedUiHtml)?.[1]
     ?.replaceAll('&amp;', '&')
   expect(rawPath, 'no batched plugin preload found in the UI HTML')
   const res = await fetch(new URL(rawPath, PROXY), { headers: session })
@@ -182,39 +205,50 @@ await check('Harness batched plugin paths keep their double-question query synta
 })
 
 await check('POST /api without cookie → 401', async () => {
-  const res = await fetch(`${PROXY}/api/rpc/connection/ping`, {
+  const res = await fetch(`${PROXY}${API_RPC_PATH}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: '{}',
+    body: apiRpcBody('unauthenticated-1'),
   })
   expect(res.status === 401, `HTTP ${res.status}`)
 })
 
-await check('authenticated /api POST passes the upstream fence (not 401/403)', async () => {
-  const res = await fetch(`${PROXY}/api/rpc/connection/ping`, {
+await check('authenticated /api RPC returns a release-valid successful payload', async () => {
+  const assertDescribe = async (res, rpcId, label) => {
+    expect(res.status === 200,
+      `${label}: HTTP ${res.status} — trust fence, upstream auth, or the RPC rejected the request`)
+    const body = await res.json()
+    expect(body.type === 'server-response' && body.rpcId === rpcId,
+      `${label}: unexpected envelope ${JSON.stringify(body).slice(0, 200)}`)
+    expect(body.result?.ok === true,
+      `${label}: RPC failed ${JSON.stringify(body.result?.error ?? body).slice(0, 200)}`)
+    const namespaces = body.result.value?.namespaces
+    expect(Array.isArray(namespaces) && namespaces.length > 0,
+      `${label}: settings/describe returned no namespaces`)
+  }
+
+  await assertDescribe(await fetch(`${PROXY}${API_RPC_PATH}`, {
     method: 'POST',
     headers: { ...session, 'content-type': 'application/json', origin: PROXY },
-    body: '{"type":"client-request","rpcId":"1","method":"ping","payload":{}}',
-  })
-  expect(res.status !== 401 && res.status !== 403, `HTTP ${res.status} — trust fence rejected`)
+    body: apiRpcBody('settings-describe-1'),
+  }), 'settings-describe-1', 'same-origin')
+
   if (!SECURE) {
     const frontedOrigin = new URL(PROXY)
     frontedOrigin.protocol = 'https:'
-    const behindTlsTerminator = await fetch(`${PROXY}/api/rpc/connection/ping`, {
+    await assertDescribe(await fetch(`${PROXY}${API_RPC_PATH}`, {
       method: 'POST',
       headers: { ...session, 'content-type': 'application/json', origin: frontedOrigin.origin },
-      body: '{"type":"client-request","rpcId":"2","method":"ping","payload":{}}',
-    })
-    expect(behindTlsTerminator.status !== 401 && behindTlsTerminator.status !== 403,
-      `HTTP ${behindTlsTerminator.status} — TLS-terminating front proxy was rejected`)
+      body: apiRpcBody('settings-describe-2'),
+    }), 'settings-describe-2', 'TLS-terminating front proxy')
   }
 })
 
 await check('authenticated cross-origin API request → 403', async () => {
-  const res = await fetch(`${PROXY}/api/rpc/connection/ping`, {
+  const res = await fetch(`${PROXY}${API_RPC_PATH}`, {
     method: 'POST',
     headers: { ...session, 'content-type': 'application/json', origin: 'https://attacker.invalid' },
-    body: '{}',
+    body: apiRpcBody('cross-origin-1'),
   })
   expect(res.status === 403, `HTTP ${res.status}`)
 })
@@ -328,10 +362,10 @@ await check('tampered device token → 401', async () => {
   const [prefix, payload, signature] = deviceToken.split('.')
   const tamperedSignature = (signature[0] === 'A' ? 'B' : 'A') + signature.slice(1)
   const tampered = `${prefix}.${payload}.${tamperedSignature}`
-  const res = await fetch(`${PROXY}/api/rpc/connection/ping`, {
+  const res = await fetch(`${PROXY}${API_RPC_PATH}`, {
     method: 'POST',
     headers: { authorization: `Bearer ${tampered}`, 'content-type': 'application/json' },
-    body: '{}',
+    body: apiRpcBody('tampered-1'),
   })
   expect(res.status === 401, `HTTP ${res.status}`)
 })
@@ -435,10 +469,10 @@ await check('POST /devices/revoke cuts the device off mid-session (HTTP + WS)', 
   expect((await revoke.json()).revoked === true, 'revoke reported false')
   const ui = await fetch(`${PROXY}/session/check`, { headers: { cookie: `dsh_token=${deviceToken}` } })
   expect(ui.status === 401, `revoked device still authenticated: HTTP ${ui.status}`)
-  const api = await fetch(`${PROXY}/api/rpc/connection/ping`, {
+  const api = await fetch(`${PROXY}${API_RPC_PATH}`, {
     method: 'POST',
     headers: { authorization: `Bearer ${deviceToken}`, 'content-type': 'application/json' },
-    body: '{}',
+    body: apiRpcBody('revoked-1'),
   })
   expect(api.status === 401, `revoked bearer reached upstream: HTTP ${api.status}`)
   const ws = await wsHandshakeStatus(`${PROXY}/api/remote.mux`, { cookie: `dsh_token=${deviceToken}` })

@@ -5,7 +5,9 @@
  * test boot-time fail-closed and restart persistence without touching a real
  * deployment. No upstream dsh required.
  *
- *   DSH_REMOTE_TOKEN=ci-test-token-123456 node scripts/verify-device-lifecycle.mjs
+ *   node scripts/verify-device-lifecycle.mjs
+ *   (overridable with DSH_REMOTE_TOKEN; the CI test token is the default so
+ *   the contract check runs standalone)
  */
 import fs from 'node:fs'
 import os from 'node:os'
@@ -13,11 +15,7 @@ import path from 'node:path'
 import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
-const TOKEN = process.env.DSH_REMOTE_TOKEN
-if (!TOKEN) {
-  console.error('DSH_REMOTE_TOKEN is required')
-  process.exit(2)
-}
+const TOKEN = process.env.DSH_REMOTE_TOKEN ?? 'ci-test-token-123456'
 
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-lifecycle-'))
 const STATE = path.join(scratch, 'devices.json')

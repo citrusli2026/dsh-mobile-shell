@@ -15,8 +15,8 @@
 #    等 docs/10 的移动端 backlog 恢复归仓并固定版本后，再把确定版本的安装命令写回此处。
 
 # 2) 启动主机 + 代理（保持两个进程）
-npx @deepseek-ai/dsh web --port 3080
-DSH_REMOTE_TOKEN=<上一步的令牌> node proxy/dsh-remote.mjs
+npx @deepseek-ai/dsh@0.2.1-alpha.1 web --port 3080
+DSH_REMOTE_TOKEN=<上一步的令牌> DSH_UPSTREAM_TOKEN=<启动令牌> node proxy/dsh-remote.mjs
 # 记录终端打印的 6 位配对码；用完或过期后签发新码：
 #   curl -X POST -H "Authorization: Bearer <令牌>" http://127.0.0.1:3081/pair/new
 ```

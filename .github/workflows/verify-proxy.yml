@@ -27,6 +27,7 @@ jobs:
         run: |
           node scripts/verify-version.mjs
           node scripts/verify-launcher.mjs
+          node scripts/verify-start-lan.mjs
           node scripts/verify-pairing-qr.mjs
 
       - name: Install Web E2E dependencies
@@ -35,12 +36,12 @@ jobs:
       - name: Install Web E2E browsers
         run: npx --prefix proxy playwright install --with-deps chromium webkit
 
-      - name: Install the published dsh CLI
-        run: npm install -g @deepseek-ai/dsh
+      - name: Install the published dsh CLI (pinned)
+        run: npm install -g @deepseek-ai/dsh@0.2.1-alpha.1
 
-      - name: Start dsh web (loopback)
+      - name: Start dsh web (loopback, upstream --public-url = proxy origin)
         run: |
-          dsh web --port 3080 > dsh.log 2>&1 &
+          dsh web --port 3080 --public-url http://127.0.0.1:3081 > dsh.log 2>&1 &
           attempt=1
           while [ "$attempt" -le 60 ]; do
             status=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3080/ || true)
@@ -60,6 +61,8 @@ jobs:
             node proxy/dsh-remote.mjs > proxy.log 2>&1 &
           sleep 1
 
+      # Browser E2E against the pinned 0.2.1-alpha.1 host launched with
+      # --public-url = this proxy origin (see the dsh web step above).
       - name: Run Web E2E in Chromium, WebKit, and mobile viewports
         env:
           DSH_REMOTE_TOKEN: ci-test-token-123456
@@ -74,6 +77,16 @@ jobs:
           sleep 1
           PROXY_URL=http://127.0.0.1:3084 DSH_REMOTE_TOKEN=ci-test-token-123456 \
             node scripts/verify-proxy.mjs
+
+      # Launcher integration evidence: scripts/start-lan.mjs must select
+      # exactly @deepseek-ai/dsh@0.2.1-alpha.1, capture the upstream launch
+      # token, and hand it to the proxy so a paired session reaches the UI,
+      # the authenticated API, and the WebSocket mux. Skips (with a note) only
+      # when the machine exposes no private LAN IPv4 address.
+      - name: Launcher integration against the pinned release (paired UI/API/WS)
+        env:
+          DSH_START_LAN_LIVE: '1'
+        run: node scripts/verify-start-lan.mjs
 
       - name: Run the TLS variant of the matrix (self-signed test cert)
         run: |

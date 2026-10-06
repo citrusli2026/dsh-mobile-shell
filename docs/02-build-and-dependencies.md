@@ -45,7 +45,7 @@
 
 - `python/sdk-runtime`：把运行时打成单可执行文件并捆绑 Python 运行时的部署根（独立构建链路）。
 - `native/landlock-run`：Linux 沙箱启动器，按架构构建后以 npm 平台包发布。
-- 发布：`scripts/release/*` 负责 bump/pack/publish，`@deepseek-ai/dsh` 家族已公开发布，终端用户 `npx @deepseek-ai/dsh web` 即用（根 `README.md`）。
+- 发布：`scripts/release/*` 负责 bump/pack/publish，`@deepseek-ai/dsh` 家族已公开发布，终端用户 `npx @deepseek-ai/dsh@0.2.1-alpha.1 web` 即用（根 `README.md`）。
 
 ## 3. 小结：上游下载面其实很小
 
